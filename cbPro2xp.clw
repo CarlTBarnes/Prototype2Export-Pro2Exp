@@ -1,15 +1,20 @@
   PROGRAM
+!Feb 2021  
+!   [28] TYPE QUEUE, GROUP are Not Exported?? '  ; QUEUE data  not exported' '  ; GROUP data not exported'  
+!   [28] Change' ; comments ' to ';;' which are omitted if OmitComments checked
+!           so can have '; comments' that ARE left
+!   [ ] If ';; ' appear Message('FYI "; comments" can be removed checking OmitComments
+!   [x] Change to CONSOLAS font?
 
 !   10/21/17 Move to C10 
 !   [x]    Update with new Data Types  BSTRING ASTRING ANY * *?  ?
 !   [ ] Header should have different? "NAME dllname GUI"     LIBRARY 'ExportTest' GUI
-!   [10/22] CONST is seen as Named type, need to remove (CONST ,CONST    PassAstring2(CONST *Astring B) ,EXPORT 
+!   [22] CONST is seen as Named type, need to remove (CONST ,CONST    PassAstring2(CONST *Astring B) ,EXPORT 
 !   [x] Revise Window and have TEXT with Mangle Encoding
 !   [no ] Could make a simple single Type encoder   Pick type from Drop list, CHECK for <Omittable>, CHECK for *ADRESS 
 !   [x] INDEX is Bk  EntityPass  PROCEDURE(KEY K, INDEX I, VIEW V, WINDOW W, <*REPORT R>)     
 !   [x] Remove spaces after < and before > so works < STRING S >
 !   [x] Remove spaces after * so "* STRING" works
-!   [ ] Change to CONSOLAS font?
 !   [ ] "Run Again" Spin up another COPY button (maybe no single thread limit)  
 !   [x] add MANGLE Button, don't do it on Accept TEXT
 !   [x] CHECK to Insert Procedure Prototypes as Comments in EXP file  ;StringPass  PROCEDURE(STRING S1, *STRING S2, <STRING S3>, <*STRING S4>) 
@@ -68,7 +73,7 @@
 DbIt    SHORT(1)       !Cut off all the Debug     IF DbIt THEN db(
 
   MAP
-    Clw2Exp(*cstring ins),string
+    Clw2Exp(*cstring ProtoLine),string
     FlattenProtoTypes(*CSTRING pPrototypes)
     Tabs2Spaces(*CSTRING pInOutString)
 CleanCWCode     procedure(string CWCode),string          !compresses and removes comment
@@ -204,6 +209,7 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
                 TEXT,AT(8,22),FULL,USE(AboutTxt),VSCROLL,FONT('Calibri',11,COLOR:Black),COLOR(0E1FFFFH),READONLY
             END
         END
+        BUTTON('ReRun'),AT(370,2,,9),USE(?ReRunBtn),TRN,SKIP,TIP('Run another instance')
     END
 
 Converter CLASS,TYPE
@@ -262,7 +268,7 @@ EndProc     PROCEDURE,VIRTUAL
             clear(ExpProto)
         else
             ExpProto='NAME dllname GUI' & |
-                     '<13,10>IMAGE_BASE 05000000h  ;--use address 0500 to 07F0 ending with 0000 to base your DLL uniquely' & |
+                     '<13,10>IMAGE_BASE 05000000h  ;--use address 0500 to 6FF0 ending with 0000 to base your DLL uniquely' & |
                      '<13,10>EXPORTS'
         end
         Clear(NamedSymbolList)
@@ -300,16 +306,18 @@ EndProc     PROCEDURE,VIRTUAL
         CWProto = ClipBoard() ; Tabs2Spaces(CWproto) 
         ShowInterfaceMsg = 0
         Post(Event:Accepted,?MangleBtn)
-    of ?Refreshbutton OROF ?RefreshButton2
-        Post(Event:Accepted,?MangleBtn)
-    of ?CopyExportButton            ;      SetClipBoard(ExpProto)
-    of ?CopyCPrototypeButton        ;      SetClipBoard(CProto)
-    of ?CopyProtoButton             ;      SetClipBoard(Cwproto)
-    of ?CleanProtoBtn               ;      DO CleanCWProtoRtn     ; DISPLAY 
-    of ?UpperProtoBtn               ;      Cwproto=upper(Cwproto) ; DISPLAY !; Post(Event:Accepted,?CWProto)
-    of ?LowerProtoBtn               ;      Cwproto=lower(Cwproto) ; DISPLAY !; Post(Event:Accepted,?CWProto)
-    of ?LeftJustifyBtn              ;      DO LeftJustifyRtn ; DISPLAY
-    of ?ExpTextEditOk               ;      ?ExpProto{PROP:ReadOnly}=CHOOSE(~ExpTextEditOk) ; ?ExpProto{PROP:Color}=CHOOSE(~ExpTextEditOk,COLOR:BTNFACE,COLOR:None) ; DISPLAY 
+    of ?Refreshbutton 
+    orof ?RefreshButton2      ;  Post(Event:Accepted,?MangleBtn)
+    of ?CopyExportButton      ;  SetClipBoard(ExpProto)
+    of ?CopyCPrototypeButton  ;  SetClipBoard(CProto)
+    of ?CopyProtoButton       ;  SetClipBoard(Cwproto)
+    of ?CleanProtoBtn         ;  DO CleanCWProtoRtn     ; DISPLAY 
+    of ?UpperProtoBtn         ;  Cwproto=upper(Cwproto) ; DISPLAY !; Post(Event:Accepted,?CWProto)
+    of ?LowerProtoBtn         ;  Cwproto=lower(Cwproto) ; DISPLAY !; Post(Event:Accepted,?CWProto)
+    of ?LeftJustifyBtn        ;  DO LeftJustifyRtn ; DISPLAY
+    of ?ExpTextEditOk         ;  ?ExpProto{PROP:Color}=CHOOSE(~ExpTextEditOk,COLOR:BTNFACE,COLOR:None) 
+                              ;  ?ExpProto{PROP:ReadOnly}=CHOOSE(~ExpTextEditOk) ; DISPLAY 
+    of ?ReRunBtn              ;  RUN(COMMAND('0'))
     END !Accepted
 
     Case Event()
@@ -377,17 +385,29 @@ Cln         like(CWProto)
 AddCWExpLine    procedure(string line2add,<STRING Protoline>)
 llen        long,auto
 pCRLF       pstring(4) 
-OrdColAdj   LIKE(OrdinalColumn)             !10/23/17 adjust for Indent 
+OrdColAdj   LIKE(OrdinalColumn)             !10/23/17 adjust for Indent
+SemiPos     ushort  
     code
     OrdColAdj = OrdinalColumn - IndentLevel - 1                     !10/23/17 
     if OrdColAdj <= IndentLevel THEN OrdColAdj = IndentLevel + 2.   !10/23/17 
     llen=len(clip(line2add))
     if ~llen then return.
     if  VAL(ExpProto[1])>0 then pCRLF='<13,10>'.
-    if left(line2add,1)=';'
-       if ~OmitComments
+    SemiPos=instring(';', line2add,1) !02/28/21 Double ;; are omittable 
+    if SemiPos AND line2add[1+SemiPos]=';' then  !is =';;' 
+       if ~OmitComments 
+           line2add=sub(line2add,1,SemiPos) & |  !Change ;; to ;
+                    sub(line2add,SemiPos+2,llen) 
+           llen -= 1
            ExpProto = ExpProto & pCRLF & All(' ',IndentLevel) & line2add[1 : llen] 
-       end
+       end 
+
+    elsif SemiPos AND line2add[1+SemiPos]='!' then  !is =';!' a Warning! line
+          ExpProto = ExpProto & pCRLF &' '& line2add[1 : llen]  !Indent 1 ' '
+          
+    elsif SemiPos then !left(line2add,1)=';'  " ; comment"
+          ExpProto = ExpProto & pCRLF & All(' ',IndentLevel) & line2add[1 : llen] 
+
     else  
           IF ProtoComments AND ~OMITTED(Protoline) AND Protoline THEN   !10/23/17 see how Proto looks in EXP as ; Comment
              ExpProto = ExpProto & pCRLF & All(' ',IndentLevel) &'  ; ' & CLIP(Protoline)   !10/23/17 
@@ -400,7 +420,7 @@ OrdColAdj   LIKE(OrdinalColumn)             !10/23/17 adjust for Indent
     return
 
 
-Clw2Exp PROCEDURE(ins)
+Clw2Exp PROCEDURE(*CSTRING ins)
 CwLine          string(1000),auto
 TempUpr         string(1000),auto  !don't try to have UPPER CW line, need to keep synching as CWLine changes
 CWLineLen       long,auto
@@ -411,7 +431,8 @@ ClarionType     string(16),auto
 Keyword         string(20)    !for keyword after label like PROCEDURE or CLASS or FUNCTION
 KeyWordPos      long
 KeyWordEnd      long
-KeyWordCharAfter  string(1)
+KeyWordCharAfter  string(1) 
+TYPE_definition LONG        !Locaton of TYPE on line
 CwUpr           string(1000)
 ePROCEDURE      equate('PROCEDURE')
 eFUNCTION       equate('FUNCTION')
@@ -464,8 +485,9 @@ eINTERFACE      equate('INTERFACE')
        if ~KeyWordEnd or ~KeyWordPos                    !can't see how this could happen but lets not blow up
             return '  ; what2? ' & CwLine
        end
-       Keyword=upper(CwLine[KeyWordPos : KeyWordEnd])
-    IF DbIt THEN DB('Keyword=' & Keyword).
+       Keyword=upper(CwLine[KeyWordPos : KeyWordEnd])  !e.g. QUEUE GROUP ANY
+       TYPE_definition=STRPOS(CwLine,', *TYPE{{$|[ ,]}',1)
+    IF DbIt THEN DB('Keyword=' & Keyword &'  TYPE=' & TYPE_definition).
        if Keyword = ePROCEDURE                                  !change to old style Proc declaration
           CwLine=' ' & |                                        !move out of column 1 the label column
                 sub(CwLine,1,KeyWordPos-1) & |                  !take the label
@@ -491,6 +513,7 @@ eINTERFACE      equate('INTERFACE')
                         '|4. Remove the IMPLEMENTS() from the CLASS line to stop this message' & |
                         '||Code: ' & CWLine, 'IMPLEMENTS() Detected', ICON:Asterisk )
             end
+            AddCWExpLine(';={20} Class: ' & clip(CwLabel) &' ={20}') !02/28/21 Mark top of == Class == in EXP
             pClassname = clip(choose(~CaseClassName,upper(CwLabel),CwLabel))
             AddCWExpLine(' VMT$' & pClassname, CwLine)
             AddCWExpLine(' TYPE$' & pClassname)
@@ -532,18 +555,26 @@ eINTERFACE      equate('INTERFACE')
 !                  ERRCODE_@_INODE_@_GRAPHCLASS@F4IGDIOl                   @?  << INODE is Child, IGDI is Parent
 
        else
-            if InClass = 1 then return('  ; Data not exported ==> ' & CwLine).
+            if InClass = 1 then return('  ;; CLASS Data is NOT exported ==> ' & CwLine).
             CwLabel=clip(choose(~CaseClassName,upper(CwLabel),CwLabel))            !Typically UPPER but follow what ever Class does
             case upper(KeyWord)
             of 'GROUP'                       !note OVER is not exported
-               AddCWExpLine('  TYPE$' & CwLabel, CwLine)
-               AddCWExpLine('  $' &     CwLabel)
-               return '  ; GROUP data not exported'
+               if ~TYPE_definition then 
+                  AddCWExpLine('  TYPE$' & CwLabel)
+                  AddCWExpLine('  $' &     CwLabel) 
+               else
+                  AddCWExpLine(';! TYPE Group is NOT exported - Remove from first tab: '& CLIP(CwLabel) &' GROUP')
+               end
+               return '  ;; GROUP data is NOT exported, remove any from first tab'
             of 'QUEUE'
-               AddCWExpLine('  TYPE$' & CwLabel, CwLine)
-               AddCWExpLine('  TCB$' &  CwLabel)
-               AddCWExpLine('  $' &     CwLabel)
-               return '  ; QUEUE data  not exported'
+               if ~TYPE_definition then 
+                  AddCWExpLine('  TYPE$' & CwLabel)
+                  AddCWExpLine('  TCB$' &  CwLabel)
+                  AddCWExpLine('  $' &     CwLabel)
+               else
+                  AddCWExpLine(';! TYPE Queue is NOT exported - Remove from first tab: '& CLIP(CwLabel) &' QUEUE')
+               end
+               return '  ;; QUEUE data is NOT exported, remove any from first tab'
             of 'FILE'
                 AddCWExpLine('  ; File exports $File plus Keys and Record, Memos and Blobs, but no fields - ' & CwLine)     !10/23/17 add FILE 
                 AddCWExpLine('  $' &     CwLabel, CwLine)     !10/23/17 add FILE 
@@ -601,7 +632,7 @@ eINTERFACE      equate('INTERFACE')
                    EquQ:ClaType = UPPER(ClarionType)
                    ADD(EquateTypeQ,EquQ:LabelType)
                    IF DbIt THEN DB('   Equate ADD: ' & clip(EquQ:LabelType) & ' Equate(' & EquQ:ClaType ) .
-                   return '  ; Equate ' & Clip(CwLabel) & ' as ' & ClarionType
+                   return '  ;; Equate ' & Clip(CwLabel) & ' as ' & ClarionType
                 end
                 return ''
             else
@@ -636,7 +667,7 @@ OldStyleProcDeclareLabel
        and ~instring(',VIRTUAL',TempUpr,1,CloseParen) |         !Private,VIRTUAL is in EXP
        and ~instring(',DERIVED',TempUpr,1,CloseParen) |         !Private,Derived is same as Virtual
        and ~inlist(UPPER(CwLabel),'CONSTRUCT','DESTRUCT')         !Private Construct/Destruct goes into EXP
-            return '  ; Private not exported => ' & clip(ins)
+            return '  ;; Private not exported => ' & clip(ins)
        end
 
     elsif InClass and InInterface                               !If in an Interface
@@ -1074,10 +1105,10 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>NextTab     PROCEDURE(LONG SheetFEQ, BOOL Wrap=0, <<*LONG TabFEQ>),LONG' &|
      '<13,10>' &|
      '<13,10>MyLong  LONG' &|
-     '<13,10>MyQue   QUEUE,TYPE' &|
-     '<13,10>MyGroup GROUP,TYPE' &|
+     '<13,10>!MyQue   QUEUE,TYPE  !Type not in EXP' &|
+     '<13,10>!MyGroup GROUP,TYPE' &|
      '<13,10>NormalQandG  PROCEDURE(QUEUE Q1, GROUP G1)' &|
-     '<13,10>NamedQandG   PROCEDURE(MyQue Q1, MyGroup G1)' &|
+     '<13,10>NamedQandG   PROCEDURE(MyQue Q1, MyGroup G1)  !Named Queue / Group' &|
      '<13,10>' &|
      '<13,10>' &|
      '<13,10>!Example of Class with INTERFACE. ' &|
