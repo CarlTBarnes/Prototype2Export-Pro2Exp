@@ -1,4 +1,6 @@
   PROGRAM
+!June 2022
+!   Filter out ! Comments. Some were ending up in EXP as !@ Exports. 06/08/22
 !Feb 2021  
 !   [28] TYPE QUEUE, GROUP are Not Exported?? '  ; QUEUE data  not exported' '  ; GROUP data not exported'  
 !   [28] Change' ; comments ' to ';;' which are omitted if OmitComments checked
@@ -285,6 +287,7 @@ EndProc     PROCEDURE,VIRTUAL
           !carl CWProtoLine =  Clip(Left(?cwproto{PROP:Line,Ndx}))
           CWProtoLine =  Clip(?cwproto{PROP:Line,Ndx})              !Carl - I want to preserve indent of END?
           If NOT CWProtoLine then cycle.
+          If LEFT(CWProtoLine,1)='!' then cycle.            !06/08/22 no !Comments
           !Carl  Do RemoveProcFunc
           !Carl  CWProtoLine = All(' ',IndentLevel) & CWProtoLine
           CWExpLine = Clip(Clw2Exp(CWProtoLine))
@@ -442,6 +445,7 @@ eINTERFACE      equate('INTERFACE')
 !pFileLabel      PSTRING(64)          !10/23/17 try to do FILE quick-and-fast
   CODE
     IF DbIt THEN DB('----- Clw2Exp ----- ' & ins).
+    If LEFT(ins,1)='!' then return ''.              !06/08/22 no !Comments
     CwLine=CleanCWCode(ins)                         !compresses and removes comments
     CWLineLen=len(clip(CWLine))
     if ~CWLineLen then return ''.
