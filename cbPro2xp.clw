@@ -1,6 +1,13 @@
+! cbPro2Exp Copyright (c) 2021 Carl T. Barnes released under the MIT License in download file named LICENSE
+! Paste in Prototypes and Pro2Exp will make your EXP lines. Very handy for a CLASS. 
+
   PROGRAM
+!Region History Comments  
 !June 2022
 !   Filter out ! Comments. Some were ending up in EXP as !@ Exports. 06/08/22
+!   OmitComments - Default to True because they are confusing and then you have to find the CHECK
+!   OrdinalColumn - Default change 60 to 0 as align pos of @? because 60 makes EXP larger
+!   Expand 30k to 60k of TEXT and warn on Paste button if Clipboard has > 60k 
 !Feb 2021  
 !   [28] TYPE QUEUE, GROUP are Not Exported?? '  ; QUEUE data  not exported' '  ; GROUP data not exported'  
 !   [28] Change' ; comments ' to ';;' which are omitted if OmitComments checked
@@ -17,7 +24,7 @@
 !   [x] INDEX is Bk  EntityPass  PROCEDURE(KEY K, INDEX I, VIEW V, WINDOW W, <*REPORT R>)     
 !   [x] Remove spaces after < and before > so works < STRING S >
 !   [x] Remove spaces after * so "* STRING" works
-!   [ ] "Run Again" Spin up another COPY button (maybe no single thread limit)  
+!   [x] "ReRun" Spin up another COPY button of EXE
 !   [x] add MANGLE Button, don't do it on Accept TEXT
 !   [x] CHECK to Insert Procedure Prototypes as Comments in EXP file  ;StringPass  PROCEDURE(STRING S1, *STRING S2, <STRING S3>, <*STRING S4>) 
 !   [ ]
@@ -71,6 +78,7 @@
 !   07/15/07 confirmed that the order of the EXP for Classed does not matter
 !   07/15/07 source can now contain type EQUATE()'s e.g. REFII EQUATE(LONG) so mangle gets right base types
 !            added many Windows standard equates e.g. HANDLE=>LONG, not sure if that's a good idea
+!EndRegion History Comments
 
 DbIt    SHORT(1)       !Cut off all the Debug     IF DbIt THEN db(
 
@@ -90,17 +98,20 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
     END
   END
 
-CWproto       CString(30000)
-ExpProto      CString(30000)
-CProto        CString(30000)
-CWProtoLine   CString(30000)
-CWExpLine     CString(30000) 
+BtnNo         BYTE
+LenIn         LONG
+MaxProto       EQUATE(60000)
+CWproto       CString(60001)
+ExpProto      CString(60001)
+CProto        CString(60001)
+CWProtoLine   CString(60001)
+CWExpLine     CString(60001) 
 RulesTxt      STRING(7100) 
 AboutTxt      STRING(1200) 
 Cw71Txt       STRING(2400) 
 
 Ndx           Short
-OrdinalColumn Byte
+OrdinalColumn Short         !06/22/22 was BYTE, need negatives
 IndentLevel   Byte
 AllowFlatten  Byte
 ProtoComments Byte          !Carl I allow  ; Prototype in EXP
@@ -147,7 +158,7 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
                 PROMPT('Indent:'),AT(82,32),USE(?IndentPrompt_1)
                 SPIN(@n3b),AT(107,32,30,10),USE(IndentLevel,, ?IndentLevel_1),HVSCROLL,RANGE(1,20),STEP(1)
                 PROMPT('Ordinal:'),AT(144,32),USE(?OrdinalPrompt_1)
-                SPIN(@n3b),AT(171,32,30,10),USE(OrdinalColumn,, ?OrdinalColumn_1),HVSCROLL
+                SPIN(@n2),AT(171,32,30,10),USE(OrdinalColumn,, ?OrdinalColumn_1),HVSCROLL,RANGE(0,99)
                 CHECK('Flatten'),AT(212,32,33),USE(AllowFlatten,, ?AllowFlatten_1),TRN
                 CHECK('; Proto'),AT(252,32,32),USE(ProtoComments,, ?ProtoComments_1),TRN
                 CHECK('O&mit ;'),AT(290,32,30),USE(OmitComments,, ?OmitComments_1),TRN
@@ -170,8 +181,8 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
                 SPIN(@n3b),AT(107,32,30,10),USE(IndentLevel),HVSCROLL,TIP('Number of columns to indent name'), |
                         RANGE(1,20),STEP(1)
                 PROMPT('Ordinal:'),AT(144,32),USE(?OrdinalPrompt)
-                SPIN(@n3b),AT(171,32,30,10),USE(OrdinalColumn),HVSCROLL,TIP('The number of columns over that you want th' & |
-                        'e "@?"')
+                SPIN(@n2),AT(171,32,30,10),USE(OrdinalColumn),HVSCROLL,TIP('The number of columns over that you want th' & |
+                        'e "@?" aligned'),RANGE(0,99)
                 CHECK('Flatten'),AT(212,32,33),USE(AllowFlatten),TRN,TIP('Allows the conversion of multiline prototypes ' & |
                         'into single line prototypes before processing.<13,10>E.G. This:<13,10,13,10>FormatAddress(<<Str' & |
                         'ing pStreetAddress>,|<13,10> {11}   <<String pCity>,|<13,10> {14}<<String pState>,|<13,10> {14}' & |
@@ -304,9 +315,39 @@ EndProc     PROCEDURE,VIRTUAL
         end
         ExpProto=clip(ExpProto) & '<13,10>'
         Display 
-        SELECT(?ExpProto)                      !10/22/17 switch tabs to show Mangle
-    of ?PasteButton
-        CWProto = ClipBoard() ; Tabs2Spaces(CWproto) 
+        SELECT(?ExpProto)                      !10/22/17 switch tabs to show Mangle 
+
+    of ?PasteButton       
+         ! 06/21/22 was: CWProto = ClipBoard() ; Tabs2Spaces(CWproto)
+         LenIn = LEN(CLIP(CLIPBOARD()))
+         IF LenIn = 0 THEN
+            Message('Clipboard is Empty','Paste') ; CYCLE 
+         ELSIF LenIn <= MaxProto THEN
+            CWProto = CLIPBOARD()
+         ELSE   
+
+            BtnNo=MESSAGE('Clipboard contains ' & LenIn &' bytes.' & |
+                         '<13,10>The maximum size is ' & MaxProto & ' bytes.' & |
+                         '||Select if you would like to process part of the paste.' & |
+                         '||Note: There is an 80 byte overlap.|Check first and last lines for truncation.' & |
+                         '','Paste Too Big',ICON:Asterisk, |
+                         'Cancel' & |                                        !Button 1 Cancel
+                               '|First ' & MaxProto & |                      !Button 2 First
+                               '|Second ' & MaxProto & |                     !Button 3 
+                         CHOOSE(LenIn < MaxProto * 3 - 80,'','|Third') & |   !Button 4
+                         CHOOSE(LenIn < MaxProto * 4 - 80,'','|Fourth') & |  !Button 5
+                         CHOOSE(LenIn < MaxProto * 5 - 80,'','|Fifth') )     !Button 6 5th
+            CASE BtnNo
+            OF 1 ; CYCLE 
+            OF 2      ; CWProto = CLIPBOARD()  !test SUB(CLIPBOARD(),1,MaxProto)
+            OF 3 TO 6 ; CWProto = SUB(CLIPBOARD(),1 + MaxProto * (BtnNo-2)-80,MaxProto)  
+                        !Message('BtnNo=' & BtnNo & '|Start=' & 1 + MaxProto * (BtnNo-2)-80 )
+            END
+            LenIn=LEN(CLIP(CWProto))
+        END
+        ?{PROP:Tip}=LenIn & ' bytes pasted at ' & Format(Clock(),@t4)
+        Tabs2Spaces(CWproto) 
+
         ShowInterfaceMsg = 0
         Post(Event:Accepted,?MangleBtn)
     of ?Refreshbutton 
@@ -323,40 +364,41 @@ EndProc     PROCEDURE,VIRTUAL
     of ?ReRunBtn              ;  RUN(COMMAND('0'))
     END !Accepted
 
-    Case Event()
-    of Event:Accepted orof Event:NewSelection
+    CASE Event()
+    OF Event:Accepted orof Event:NewSelection
       Case Field()
       of   ?IndentLevel  orof ?OrdinalColumn orof ?OmitComments  orof ?ProtoComments
       orof ?AddEXPHeader orof ?CaseProcName  orof ?CaseClassName orof ?CaseSelfName
             POST(Event:Accepted,?MangleBtn)
       end
-    of Event:CloseWindow    ;  DO PutIniRtn 
-    end
+    OF Event:CloseWindow    ;  DO PutIniRtn
+    OF Event:Rejected       ;  DISPLAY(?) ; SELECT(?)
+    END
   END
   RETURN 
 
 GetIniRtn ROUTINE
     IniFile = LongPath('.\cbPro2Exp.INI') 
     IndentLevel   = GetINI('Defaults','IndentLevel',    2,IniFile)
-    OrdinalColumn = GetINI('Defaults','OrdinalColumn',  60,IniFile)
+    OrdinalColumn = GetINI('Defaults','OrdinalColumn',  0,IniFile) ; IF OrdinalColumn>99 THEN OrdinalColumn=99. !06/21/22 was 60
     AllowFlatten  = GetINI('Defaults','AllowFlatten',   1,IniFile)
     ProtoComments = GetINI('Defaults','ProtoComments',  0,IniFile)
-    OmitComments  = GetINI('Defaults','OmitComments',   0,IniFile)
+    OmitComments  = GetINI('Defaults','OmitComments',   1,IniFile)  !06/21/22 was 0, these are confusing so omit by default
     AddEXPHeader  = GetINI('Defaults','AddEXPHeader',   1,IniFile)
     CaseProcName  = GetINI('Defaults','CaseProcName',   0,IniFile)
     CaseClassName = GetINI('Defaults','CaseClassName',  0,IniFile)
     CaseSelfName  = GetINI('Defaults','CaseSelfName',   0,IniFile)
     EXIT 
 PutIniRtn ROUTINE
-    PutINI('Defaults','IndentLevel',    IndentLevel,IniFile)
+    PutINI('Defaults','IndentLevel',    IndentLevel  ,IniFile)
     PutINI('Defaults','OrdinalColumn',  OrdinalColumn,IniFile)
-    PutINI('Defaults','AllowFlatten',   AllowFlatten,IniFile)
+    PutINI('Defaults','AllowFlatten',   AllowFlatten ,IniFile)
     PutINI('Defaults','ProtoComments',  ProtoComments,IniFile)
-    PutINI('Defaults','OmitComments',   OmitComments,IniFile)
-    PutINI('Defaults','AddEXPHeader',   AddEXPHeader,IniFile)
-    PutINI('Defaults','CaseProcName',   CaseProcName,IniFile)        !should I preserve these Case things, could get in trouble
+    PutINI('Defaults','OmitComments',   OmitComments ,IniFile)
+    PutINI('Defaults','AddEXPHeader',   AddEXPHeader ,IniFile)
+    PutINI('Defaults','CaseProcName',   CaseProcName ,IniFile)        !should I preserve these Case things, could get in trouble
     PutINI('Defaults','CaseClassName',  CaseClassName,IniFile)
-    PutINI('Defaults','CaseSelfName',   CaseSelfName,IniFile)
+    PutINI('Defaults','CaseSelfName',   CaseSelfName ,IniFile)
     EXIT
     
 CleanCWProtoRtn     routine
@@ -1009,7 +1051,7 @@ CConverter.EndProc     PROCEDURE
     Self.Hold = Self.Hold & ')'
 
 FlattenProtoTypes Procedure(*CSTRING pPrototypes)
-LOC:Prototypes CString(30000)
+LOC:Prototypes CString(MaxProto+1)
 Ndx2           Short
 L              Short
 IsComment      Byte
