@@ -1,0 +1,55 @@
+Mangle letter codes put in order to possibly build a decoder.
+
+1. Maybe check for ## to indicate a Named type, then jump ahead the ## e.g. 10NAMED_TYPES
+2. Check for OPR to indicate *Address or <Omittable>
+3. Check for A's to indicate Arrays
+4. Check for a Type: Ba Bb Bf Bi Bk Bk Bq Br Bw Uc Ul Us b4 b8 bd bt c d e f g l p s sa sb sc sp sw u u v 
+5. Possible issues sp = (SHORT,PDECIMAL) same as sp = (PSTRING)
+
+-------------------------
+##       NAMED_TYPES  ##TYPENAME  ## = Length of the Name + Type Name UPPER e.g. NAMED_TYPES => 10NAMED_TYPES
+
+O        By Value    <Omittable>   e.g. <STRING>  => Osb  - Prepend one RPO except on "B" types
+P        By *Address <*Omittable>  e.g. <*STRING> => Psb  - Prepend one RPO except on "B" types
+R        By *Address Required      e.g. *STRING   => Rsb  - Prepend one RPO except on "B" types
+
+A        Array, one "A" per Dim after O,P,R  e.g. *LONG[,]  => RAAl  or  <*LONG[,]> => PAAl 
+
+Ba       APPLICATION      unsigned  - Compiler rejects use WINDOW
+Bb       BLOB             void *,unsigned bnum
+Bf       FILE             void *
+Bi       VIEW             void *
+Bk       INDEX            void *
+Bk       KEY              void *
+Bq       QUEUE            void *
+Br       REPORT           unsigned
+Bw       WINDOW           unsigned
+
+Uc       BYTE             byte
+Ul       ULONG            unsigned long
+Us       USHORT           unsigned short
+
+b4       BFLOAT4          n/a
+b8       BFLOAT8          n/a
+bd       DATE             long
+bt       TIME             long
+
+c        CSTRING RAW      char *       w/o RAW: unsigned len,char *
+d        REAL             double
+e        DECIMAL          char *       w/o RAW: unsigned len,char *
+f        SREAL            float
+g        GROUP            char *       w/o RAW: unsigned len,char *,void *tpe
+l        LONG             long
+p        PDECIMAL         char *       w/o RAW: unsigned len,char *
+s        SHORT            short
+
+sa       ASTRING     
+sb       STRING           n/a          STRING not passed by address N/A
+sc       CSTRING          char *       w/o RAW: unsigned len,char *
+sp       PSTRING          char *       w/o RAW: unsigned len,char *
+sw       BSTRING     
+u        ?                n/a         FYI: Ru       *?               n/a
+u        ANY              n/a         FYI: Ru       *ANY        
+v        GROUP RAW        char *       w/o RAW: unsigned len,char *,void *tpe
+
+F        Procedure mangled format is: "ProcedureName(UPPER)" + "@F" + Mangled (Parameters). e.g. GetExt(BYTE,LONG),STRING => GETEXT@FUcl
