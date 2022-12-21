@@ -1,0 +1,173 @@
+These Clarion Mangle rules are to aid in understanding the mangling process, and to help in reverse engineer a Mangled Export back to a Prototype. 
+
+Generally a single parameter stars with optional prepend UPPERCASE byte(s) (BROPA) and ends with a single lowercase letter. There can be 2 lowercase letters with "b" or "s" e.g. "sb" is a STRING, except a SHORT is an "s" alone.
+
+Procedure mangled format is: "ProcedureName(UPPER)" + "@F" + Mangled (Parameters). e.g. GetExt(BYTE,LONG),STRING => GETEXT@FUcl
+
+Procedure name exports are case sensitive under Windows. Clarion works around this by UPPERing the Procedure Names, but the mangling codes for parameter data are mixed case so case sensitive. 
+
+E.g. "PassAstring2opt(<*Astring A>, *USHORT U)" mangles as "PASSASTRING2OPT@FPsaRUs" note that the Procedure name was UPPER CASED but the (<*Astring A>, *USHORT U) is mixed case "@FPsaRUs".
+
+Binary Objects - Always by Address and will never have Prepend "R". These can be omittable (e.g. <Report>) but that does NOT change the mangle and prepend "P".
+
+Object         Mangle           C Proto
+-----------    ------           -------
+FILE           Bf               void *
+BLOB           Bb               void *,unsigned bnum
+KEY            Bk               void *
+INDEX          Bk               void *
+QUEUE          Bq               void *
+REPORT         Br               unsigned
+WINDOW         Bw               unsigned
+VIEW           Bi               void *
+APPLICATION    Ba               unsigned  - Compiler rejects use WINDOW
+
+Prepend one of these (Except "B" types above):
+----------------------------------------------
+  R = By *Address Required      e.g. *STRING   => Rsb
+  P = By *Address <*Omittable>  e.g. <*STRING> => Psb  
+  O = By Value    <Omittable>   e.g. <STRING>  => Osb
+    = By Value Required         e.g. STRING    => sb   Nothing Prepended
+
+After above can also Prepend an Array Declarator:
+-------------------------------------------------
+  A = Array, one "A" per Dim    e.g. *LONG[,]  => RAAl  or  <*LONG[,]> => PAAl
+
+
+Type         Mangle   RAW     C Proto
+---------    ------   ---     -----------
+BYTE         Uc               byte
+SHORT        s                short
+USHORT       Us               unsigned short
+LONG         l                long
+ULONG        Ul               unsigned long
+DATE         bd               long
+TIME         bt               long
+DECIMAL      e                char *       w/o RAW: unsigned len,char *
+PDECIMAL     p                char *       w/o RAW: unsigned len,char *
+SREAL        f                float
+REAL         d                double
+BFLOAT4      b4               n/a
+BFLOAT8      b8               n/a
+?            u                n/a
+ANY          u                n/a
+*?           Ru               n/a
+*ANY         Ru
+STRING       sb               n/a          STRING not passed by address N/A
+GROUP        g        v       char *       w/o RAW: unsigned len,char *,void *tpe
+CSTRING      sc       c       char *       w/o RAW: unsigned len,char *
+PSTRING      sp               char *       w/o RAW: unsigned len,char *
+ASTRING      sa
+BSTRING      sw
+INT          i                32-bit Integer seen only in C Prototypes
+PROCEDURE    Fmangle_         TYPE procedure => "F" + "prototype mangle" + "_"
+
+Named Types:
+NAMED_TYPES  ##TYPENAME       ## = Length of the Name + Type Name UPPER e.g. NAMED_TYPES => 10NAMED_TYPES
+
+
+Examples       Mangle  Raw
+------------   ------  ---
+*DECIMAL       Re
+*PDECIMAL      Rp
+
+STRING         sb
+<STRING>       Osb
+*STRING        Rsb
+<*STRING>      Psb
+
+PSTRING        sp
+*PSTRING       Rsp
+<*PSTRING>     Psp
+
+CSTRING        sc       c
+*CSTRING       Rsc
+<*CSTRING>     Psc
+
+GROUP          g        v
+<GROUP>        Og       Ov
+*GROUP         Rg       Rv
+<*GROUP>       Pg       Pv
+
+BSTRING        sw
+<BSTRING>      Osw
+*BSTRING       Rsw
+<*BSTRING>     Psw
+
+ASTRING        sa
+<ASTRING>      Osa
+*ASTRING       Rsa
+<*ASTRING>     Psa
+
+Miscellaneous -------------------
+CONST has no affect on Clarion Mangle, it does affect C mangling, see below.
+
+GROUP  Exports 2 Symbols: $GROUPNAME and TYPE$GROUPNAME
+QUEUE  Exports 3 Symbols: $QUEUENAME and TYPE$QUEUENAME and TCB$QUEUENAME
+CLASS  Exports 2 Symbols: VMT$ClassName and TYPE$ClassName
+              +1 /method: MethodName + @F + ##ClassName + Method Parameters Mangled 
+                          e.g. HlpEngCls.Match PROCEDURE(CONST *CSTRING) => MATCH@F9HLPENGCLSRsc   
+
+
+FILE Exports: 
+------------------------
+This tool does not do FILE Exports, but here are the rules.
+    FILE exports 1 $FILENAME symbol
+      +1 Symbol  for each KEY, INDEX, BLOB, MEMO: FILENAME$PRE:NAME
+      +2 Symbols for Record: FILENAME$PRE:RECORD and FILENAME$TYPE$PRE:RECORD
+    
+    Example:
+    ---------
+    DataFile              FILE,DRIVER('TOPSPEED'),PRE(DaF),CREATE,BINDABLE ,EXPORT !Data for Popup choices from POPUP.TXT
+    Key1                     KEY(DF:Type,DF:Seq),NOCASE,OPT,PRIMARY                   
+    Index1                   INDEX(DF:Item)
+    Blob1                    BLOB
+    Memo1                    MEMO(5000)
+    Record                   RECORD,PRE()
+    
+    Exports:
+    ------------------
+    $DATAFILE
+    DATAFILE$DAF:BLOB1
+    DATAFILE$DAF:INDEX1
+    DATAFILE$DAF:KEY1
+    DATAFILE$DAF:MEMO1
+    DATAFILE$DAF:RECORD
+    DATAFILE$TYPE$DAF:RECORD
+
+
+Value-Types:
+   BYTE  SHORT  USHORT  LONG  ULONG  SREAL  REAL  DATE  TIME  STRING  BSTRING  ASTRING
+
+Address "R" Types (or "P" if <omittble>):
+   *BYTE  *SHORT  *USHORT  *LONG  *ULONG  *SREAL  *REAL  *BFLOAT4  *BFLOAT8
+   *DECIMAL  *PDECIMAL   *DATE   *TIME  *STRING  *PSTRING  *CSTRING  *GROUP  *BSTRING  *ASTRING
+
+Entity-parameters "B" Types:
+   FILE   VIEW   KEY   INDEX   QUEUE   WINDOW   REPORT   BLOB
+
+
+Other ways to get mangling:
+---------------------------
+The best way is to use EXPORT and then look in LibMaker.
+You can prototype the import side and the next build in the MAP will show all the missing imports complete with mangling.
+Templates off 
+
+
+TopSpeed C++ Mangling from the Programmers Guide
+These may behelpful decoding RUN DLL Exports.
+---------------------------------------------------
+    Type Encode          Modifiers      Declarators
+    ---- ------          - --------     - ---------
+    c    char            C const        P pointer
+    d    double          S signed       R reference
+    e    ellipse         U unsigned     F function  F<args>_<type> Function taking <Args> Returning <Type>
+    f    float           V volatile     A array     A<size>_<type> Array of specified <Size> of <Type>
+    i    int 16/32                      M Member    M<type-1><type-2> Pointer to member of class <type-1> of <type-2>
+    l    long
+    s    short
+    r    long double
+    v    void
+
+    Named types are encoded: _ + (Length of Name) + Name + _   e.g.  _7Complex_
+
