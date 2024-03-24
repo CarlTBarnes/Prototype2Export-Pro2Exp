@@ -2,7 +2,12 @@
 ! Paste in Prototypes and Pro2Exp will make your EXP lines. Very handy for a CLASS. 
 
   PROGRAM
-!Region History Comments  
+!Region History Comments
+!March 2024
+!   Bug prototype "Blarg Procedure  (...)" with 2+ spaces before "(" did not clean correctly in CleanCWCode, ignored parms completely
+!   Name('nnn | aaa') containing Pipes now are preserved, but end up in mangled name
+!   Refactor some code to be more readable. Rename some variables. Add CONST *CString to be clear not changed.
+!   Improve some DB Debug output format and add some
 !June 2022
 !   Filter out ! Comments. Some were ending up in EXP as !@ Exports. 06/08/22
 !   OmitComments - Default to True because they are confusing and then you have to find the CHECK
@@ -83,8 +88,9 @@
 DbIt    SHORT(1)       !Cut off all the Debug     IF DbIt THEN db(
 
   MAP
-    Clw2Exp(*cstring ProtoLine),string
-    FlattenProtoTypes(*CSTRING pPrototypes)
+    Clw2Exp(*CSTRING InOutProtoLine),string
+    FlattenProtoTypes(*CSTRING InOutPrototypes)
+    PipeHideInQuotes(*CSTRING InOutPrototypes, BOOL bHide=True) !03/22/24 CB Hide Pipes inside 'quotes' 
     Tabs2Spaces(*CSTRING pInOutString)
 CleanCWCode     procedure(string CWCode),string          !compresses and removes comment
 IsKeyword       procedure(*string CodeLine, string Keyword2Find),long !Check if there is keyword followed by delim, return Pos
@@ -92,9 +98,9 @@ DB              procedure(string debugMsg)               !Output Debug
 AddCWExpLine    procedure(string line2add,<STRING Protoline>)               !add line to CWExpLine EXP block
 Load_EquateTypeQ    procedure()                          !Load EquateTypeQ 
                                                                                                         
-LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRING Cw71z)  !Move big strings to bottom
+LoadWindowTxt   procedure(*CSTRING OutProtoz, *STRING Rulez, *STRING Aboutz, *STRING Cw71z)  !Move big strings to bottom
     MODULE('Win32')
-        outputdebugstring(*cstring),raw,pascal,name('outputdebugstringA')
+        outputdebugstring(*cstring),raw,pascal,name('outputdebugstringA'),dll(1)
     END
   END
 
@@ -232,7 +238,7 @@ NoMangle    BYTE
 IsOmitable  BYTE
 IsAddress   BYTE
 Adims       BYTE
-Convert     FUNCTION(*cstring),STRING
+Convert     PROCEDURE(CONST *CSTRING InLine),STRING
 StoreName   PROCEDURE(string,byte PreserveCase),VIRTUAL         !Carl  added PreserveCase
 StoreSym    PROCEDURE(Byte,byte,string),VIRTUAL
 StoreResult PROCEDURE(Byte),VIRTUAL
@@ -465,7 +471,7 @@ SemiPos     ushort
     return
 
 
-Clw2Exp PROCEDURE(*CSTRING ins)
+Clw2Exp PROCEDURE(*CSTRING InOutLine)
 CwLine          string(1000),auto
 TempUpr         string(1000),auto  !don't try to have UPPER CW line, need to keep synching as CWLine changes
 CWLineLen       long,auto
@@ -486,9 +492,9 @@ eINTERFACE      equate('INTERFACE')
 !pFilePRE        PSTRING(20)          !10/23/17 try to do FILE quick-and-fast
 !pFileLabel      PSTRING(64)          !10/23/17 try to do FILE quick-and-fast
   CODE
-    IF DbIt THEN DB('----- Clw2Exp ----- ' & ins).
-    If LEFT(ins,1)='!' then return ''.              !06/08/22 no !Comments
-    CwLine=CleanCWCode(ins)                         !compresses and removes comments
+    IF DbIt THEN DB('----- Clw2Exp Line  In=' & InOutLine).
+    If LEFT(InOutLine,1)='!' then return ''.              !06/08/22 no !Comments
+    CwLine=CleanCWCode(InOutLine)                         !compresses and removes comments
     CWLineLen=len(clip(CWLine))
     if ~CWLineLen then return ''.
 
@@ -713,7 +719,7 @@ OldStyleProcDeclareLabel
        and ~instring(',VIRTUAL',TempUpr,1,CloseParen) |         !Private,VIRTUAL is in EXP
        and ~instring(',DERIVED',TempUpr,1,CloseParen) |         !Private,Derived is same as Virtual
        and ~inlist(UPPER(CwLabel),'CONSTRUCT','DESTRUCT')         !Private Construct/Destruct goes into EXP
-            return '  ;; Private not exported => ' & clip(ins)
+            return '  ;; Private not exported => ' & clip(InOutLine)
        end
 
     elsif InClass and InInterface                               !If in an Interface
@@ -732,10 +738,10 @@ OldStyleProcDeclareLabel
 !              sub(CWLine,XX,999)
 !       TempUpr = UPPER(CWLine)
     end
-    IF DbIt THEN DB('xxxxxCWCode: ' & CwLine).
-    ins=clip(CwLine)
-            
-    RETURN ExpConverter.Convert(ins)
+    InOutLine=clip(CwLine)
+    IF DbIt THEN DB('----- Clw2Exp Line Out=' & InOutLine).    
+
+    RETURN ExpConverter.Convert(InOutLine)
 
 IsKeyword PROCEDURE(*string CodeLine, string Keyword2Find)!,long !Check if there is keyword followed by delim, return Pos
 Rtn long,auto
@@ -758,7 +764,7 @@ InQuote short
 AQuote  EQUATE('<39>')
 Char    string(1)
     code
-    IF DbIt THEN DB('CleanCWCode: ' & CWCode) .
+    IF DbIt THEN DB('CleanCWCode In:  ' & CWCode) .
     CWCodeLen = len(clip(CWCode))
     loop Xin = 1 to CWCodeLen
          Char = CWCode[Xin]
@@ -768,14 +774,14 @@ Char    string(1)
              of '!'
                     if Xin<CWCodeLen and CWCode[Xin+1]<>'^' then break.  !10/23/17 IF<Len  !hit a comment, all done  (keep comments that are !^ so can have !^,CHILD=
              of '|' ; break                             !line continue means done but should not see if Jeff flattened
-             of ''                                      !smash out unneeded spaces
-                if XOut |                               !any output chars
-                and inlist(Cln[XOut],'(',')',',',' ','<<','*')  !10/22/17 added "<"   !if prev out character is a delim then do not need this space
-                    cycle
+             of ' '                                     !Next In Char = Space ... remove spaces if delimeters (),<> ajacent
+                if XOut |                                           !Any output chars ... and
+                and inlist(Cln[XOut],    '(',')',',',' ','<<','*')  !If Prev OUT Character is a Delim,  !10/22/17 added "<"   
+                    cycle           !     (   )   ,   32  <    *    !   then do not need this space
                 end
-                if Xin < CWCodeLen |
-                and inlist(CWCode[Xin+1],'(',',',')','>')       !10/22/17 added ">"   !if next character is a delim then do not need this space
-                    cycle
+                if Xin < CWCodeLen |                                !Not the Last Char, or +1 is beyond the end of in string
+                and inlist(CWCode[Xin+1],'(',')',',',' ','>')       !If Next IN Character is a delim   !03/22/24 added " " !10/22/17 added ">" 
+                    cycle           !     (   )   ,   32  >         !   then do not need this space
                 end
                
              end !case Char
@@ -783,7 +789,7 @@ Char    string(1)
          XOut += 1
          Cln[XOut]=Char
     end
-    IF DbIt THEN DB('CleanedCode: ' & Cln).
+    IF DbIt THEN DB('CleanedCode Out: ' & Cln).
     return clip(Cln)
 !-------------------------------
 DB   PROCEDURE(STRING xMessage)
@@ -811,7 +817,7 @@ Converter.EndProc     PROCEDURE
 Converter.StartProc     PROCEDURE
   CODE
 
-Converter.Convert FUNCTION(ins)
+Converter.Convert PROCEDURE(CONST *CSTRING Ins) !,STRING    !Carl: I'd like to rename INS to InLine but its 25 changes
 Gn       SIGNED,AUTO
 EndP     SIGNED
 Symbol   CSTRING(80)
@@ -821,6 +827,7 @@ TVal     BYTE
 NameX    LONG
 sName    string(255),auto
   CODE
+    IF DbIt THEN Db('   ---Convert In=' & Ins).
     Gn = INSTRING('(',ins)
     IF ~Gn THEN
       Self.StoreName(ins,CaseProcName)
@@ -839,7 +846,7 @@ sName    string(255),auto
       ! More, need return type
 
       NameX=Instring(',NAME(''',UPPER(Ins),1,EndP)          !Carl 12/21/2006  a NAME('externalname') does no Mangling
- IF DbIt THEN db('NameX=' & NameX & ' EndP=' & EndP & '  ins=' & ins).
+ IF DbIt THEN db(' {9}NameX=' & NameX & ' EndP=' & EndP & '  ins=' & ins).
       if NameX                                              !did I find NAME('
          sName=sub(Ins,NameX+7,255)                         !now have: extname')
          NameX=instring(chr(39),sName,1)
@@ -851,9 +858,9 @@ sName    string(255),auto
     Self.StartProc()
     IF ~Self.NoMangle THEN
       LOOP UNTIL Ins[Gn] = ')'  
- IF DbIt THEN DB('Ins=' & Ins) .
+ IF DbIt THEN DB(' {9}Ins=' & Ins) .
         DO GetSymbol
- IF DbIt THEN DB('GetSymbol=' & Symbol &'   SymbolP=' & SymbolP) .
+ IF DbIt THEN DB(' {9}GetSymbol=' & Symbol &'   SymbolP=' & SymbolP) .
         IF ~Symbol THEN BREAK .
 !        IF INLIST( UPPER(Symbol),'SIGNED','UNSIGNED','BOOL')            !Some Clarion equated Longs
 !             Symbol='LONG'
@@ -874,7 +881,7 @@ sName    string(255),auto
         EquQ:LabelType = UPPER(Symbol)
         GET(EquateTypeQ,EquQ:LabelType)
         IF ~ERRORCODE() and EquQ:ClaType<>EquQ:LabelType THEN           !Is this something like UNSIGNED EQUATE(LONG)?
-            IF DbIt THEN DB('Equate Lookup ' & Symbol & ' ==> ' &  EquQ:ClaType ) .
+            IF DbIt THEN DB(' {9}Equate Lookup ' & Symbol & ' ==> ' &  EquQ:ClaType ) .
             Symbol = EquQ:ClaType                                       !then the real type is LONG
         END                          
                                      ! 1 Bf      2 Bb      3 Bk  4 Bq    5 Br     6 Bw      7 Bi   8 Ba
@@ -892,6 +899,7 @@ sName    string(255),auto
       END                                 !11        12        13        14       15       16        17        18      19         20
     END
     Self.EndProc
+    IF DbIt THEN Db('   ---Convert Return=' & Self.Hold).
     RETURN Self.Hold
 
 ! Gn comes in pointing to last seperator;  Exits pointing to next seperator;  Symbol has type name from prototype
@@ -963,7 +971,7 @@ ExpConverter.StoreSym    PROCEDURE(Byte EVal,Byte TVal,string symbol)
           NamedSymbolList=clip(NamedSymbolList) &' '& Symbol                    !A list so I can spot bad symbol names or missed equates
       end
     END
-    IF DbIt THEN DB('StoreSym Self.Hold=' & Self.Hold ) .
+    IF DbIt THEN DB(' {9}StoreSym Self.Hold=' & Self.Hold ) .
 
 Preamble ROUTINE
   IF Self.IsAddress OR Self.Adims THEN
@@ -1050,34 +1058,35 @@ CConverter.EndProc     PROCEDURE
   CODE
     Self.Hold = Self.Hold & ')'
 
-FlattenProtoTypes Procedure(*CSTRING pPrototypes)
-LOC:Prototypes CString(MaxProto+1)
+FlattenProtoTypes Procedure(*CSTRING InOutPrototypes)
+pPrototypes    CString(MaxProto+1)  !InOut Prototypes with the Pipes in Name('x|x') hidden so they are not used to flatten
+FlatPrototypes CString(MaxProto+1)
 Ndx2           Short
 L              Short
 IsComment      Byte
   CODE
+  pPrototypes=InOutPrototypes
+  PipeHideInQuotes(pPrototypes, True)   !03/22/24 CB HACK Hide Pipe in 'x | x' so 'x <FC> x' and not found below 
   Ndx  = 1
   Ndx2 = Instring('|',pPrototypes,1,1)      !Carl Note, this could not work right. It could find a | in 'quotes' or !comments. I wrote better flatten in CWA_WindowText
   If NOT Ndx2 > 2 then return.
-
-  Clear(LOC:Prototypes)
+  IF DbIt THEN DB('FlattenProtoTypes Top: Pipe Ndx2=' & Ndx2 & ' <13,10>In Prototypes=' & InOutPrototypes &'<13,10>-{50}').
+ 
+  Clear(FlatPrototypes)
   L = Len(pPrototypes)
   Loop
-    LOC:ProtoTypes = Clip(LOC:ProtoTypes) & pProtoTypes[Ndx : Ndx2 - Choose(Ndx2=L,0,1)]
+    FlatPrototypes = Clip(FlatPrototypes) & pProtoTypes[Ndx : Ndx2 - Choose(Ndx2=L,0,1)]
     If Ndx2 >= L then break.
     Loop Ndx = Ndx2+1 to L
       Case pPrototypes[Ndx]
-      of '!'
-        IsComment = TRUE
-      of '<13>' orof '<10>'
-        IsComment = FALSE
-        Cycle
-      of ' '
-        Cycle
-      else
-        If NOT IsComment
-          Break
-        end
+        Of '!'      ; IsComment = TRUE
+        Of '<13>' 
+      OrOf '<10>'   ; IsComment = FALSE ; Cycle
+        Of ' '      ; Cycle
+      Else
+          If NOT IsComment
+            Break
+          end
       end
     end
     Ndx2 = Instring('|',pPrototypes,1,Ndx)
@@ -1085,9 +1094,33 @@ IsComment      Byte
       Ndx2 = L
     end
   end
-  pProtoTypes = LOC:ProtoTypes
-  RETURN 
-  
+  PipeHideInQuotes(FlatPrototypes, False)   !03/22/24 CB HACK UnHide Pipes so is 'x | x' 
+  InOutPrototypes = FlatPrototypes
+  IF DbIt THEN DB('FlattenProtoTypes End:<13,10>Out Prototypes=' & InOutPrototypes&'<13,10>-{50}').  
+  RETURN
+
+!Jeff was processing some code that had the NAME('with | Pipes') as used by Capesoft Reflection and found those pipes
+!confused the logic here. I don't see this as a major problem so the quickest hack was to hide Pipes inside 'Quotes'
+!by adding 80h making 7Ch an FCh. 
+!Long ago I had noted above on the Ndx2= line "this could not work right. It could find a | in 'quotes' ..."
+
+PipeHideInQuotes PROCEDURE(*CSTRING ioProto, BOOL bHide=True) !03/22/24 CB Hide Pipes inside 'quotes | with | pipes ' 
+X LONG,AUTO
+InQuote short
+Pipe1 STRING('|')       !7Ch               
+Pipe2 STRING('<0FCh>')                      !HACK: Hide=1 changes 7C to FC so not found by Instring('|'
+    CODE
+    IF ~bHide THEN Pipe1=Pipe2 ; Pipe2='|'. !HACK: Hide=0 changes FC to 7C so back to original
+    loop X=1 TO LEN(ioProto)
+       case val(ioProto[X])
+       of 39 ; InQuote=1 - InQuote
+       of 10 ; InQuote=0
+       end
+       if ~InQuote OR ioProto[X]<>Pipe1 THEN CYCLE.
+       ioProto[X]=Pipe2
+    end
+    RETURN  !Test line:  DateD2 PROCEDURE(*LONG D1) ,NAME('DateD2 | @D2')
+
 Tabs2Spaces PROCEDURE(*CSTRING pStr)
 X LONG 
     CODE

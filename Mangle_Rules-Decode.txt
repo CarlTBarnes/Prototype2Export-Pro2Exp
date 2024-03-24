@@ -13,7 +13,7 @@ O        By Value    <Omittable>   e.g. <STRING>  => Osb  - Prepend one RPO exce
 P        By *Address <*Omittable>  e.g. <*STRING> => Psb  - Prepend one RPO except on "B" types
 R        By *Address Required      e.g. *STRING   => Rsb  - Prepend one RPO except on "B" types
 
-A        Array, one "A" per Dim after O,P,R  e.g. *LONG[,]  => RAAl  or  <*LONG[,]> => PAAl 
+A        Array, one "A" per Dim after P or R  e.g. *LONG[,]  => RAAl  or  <*LONG[,]> => PAAl 
 
 Ba       APPLICATION      unsigned  - Compiler rejects use WINDOW
 Bb       BLOB             void *,unsigned bnum
@@ -34,22 +34,41 @@ b8       BFLOAT8          n/a
 bd       DATE             long
 bt       TIME             long
 
-c        CSTRING RAW      char *       w/o RAW: unsigned len,char *
+c        CSTRING RAW      char *       
 d        REAL             double
-e        DECIMAL          char *       w/o RAW: unsigned len,char *
+e        DECIMAL          char *       Always by *Address = Re or Pe = <*>
 f        SREAL            float
-g        GROUP            char *       w/o RAW: unsigned len,char *,void *tpe
+g        GROUP            char *       
 l        LONG             long
-p        PDECIMAL         char *       w/o RAW: unsigned len,char *
+p        PDECIMAL         char *       Always by *Address = Rp or Pp = <*>
 s        SHORT            short
 
 sa       ASTRING     
 sb       STRING           n/a          STRING not passed by address N/A
-sc       CSTRING          char *       w/o RAW: unsigned len,char *
-sp       PSTRING          char *       w/o RAW: unsigned len,char *
+sc       CSTRING          char *       Always by *Address = Rsc or Psc = <*>
+sp       PSTRING          char *       Always by *Address = Rsp or Psp = <*>
 sw       BSTRING     
 u        ?                n/a         FYI: Ru       *?               n/a
 u        ANY              n/a         FYI: Ru       *ANY        
 v        GROUP RAW        char *       w/o RAW: unsigned len,char *,void *tpe
 
 F        Procedure mangled format is: "ProcedureName(UPPER)" + "@F" + Mangled (Parameters). e.g. GetExt(BYTE,LONG),STRING => GETEXT@FUcl
+
+
+TopSpeed C++ Mangling from the Programmers Guide
+These may behelpful decoding RUN DLL Exports.
+---------------------------------------------------
+    Type Encode          Modifiers      Declarators
+    ---- ------          - --------     - ---------
+    c    char            C const        P pointer
+    d    double          S signed       R reference
+    e    ellipse         U unsigned     F function  F<args>_<type> Function taking <Args> Returning <Type>
+    f    float           V volatile     A array     A<size>_<type> Array of specified <Size> of <Type>
+    i    int 16/32                      M Member    M<type-1><type-2> Pointer to member of class <type-1> of <type-2>
+    l    long
+    s    short
+    r    long double
+    v    void
+
+    Named types are encoded: _ + (Length of Name) + Name + _   e.g.  _7Complex_
+
