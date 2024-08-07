@@ -57,3 +57,13 @@ The “Parse EXP Q” tab shows the exports in a list that is sortable by clicki
 You can also paste in an EXP and process it by checking the “Input is EXP”.  The main benefit is it will sort the EXP by class and also allow viewing it in a LIST. The statistics tab will show symbol sizes which I use to write utilities.
 
 ![experrors5](images/rm_experrors5.png)
+
+---
+
+## Decode Export Mangle to Prototype (Exp2Map)
+
+Checkout this [repo with the Exp2Map tool](https://github.com/CarlTBarnes/Exp2map_OwenBrunker) that will decode a Mangled EXP Line back into a Procedure Prototype Parameter list.
+
+E.g. Pro2Exp will encode `MyFunction PROCEDURE(LONG SheetFEQ, BOOL Wrap=0, <*LONG TabFEQ>,STRING S1, *STRING S2),LONG` into `MYFUNCTION@FllPlsbRsb @?`.
+
+The Exp2Map tool will take `MYFUNCTION@FllPlsbRsb @?` as input and decode the `llPlsbRsb` as `(LONG Parm_1, LONG Parm_2, <*LONG Parm_3>, STRING Parm_4, *STRING Parm_5)`.
