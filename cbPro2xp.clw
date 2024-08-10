@@ -3,6 +3,19 @@
 
   PROGRAM
 !Region History Comments
+!August 8, 2024
+!   Add a "CLR" button to Clear all my Examples. Shift+Paste button does NOT DO Mangle.
+!   Bug "Index out of Range" with Multi-Line prototype and Flatten unchecked. 
+!       Added several IF Var > Len to avoid problem. 
+!       TODO: Should change .Convert and Symbol Routine to not use String [Slices] instead SUB().
+!   Flatten is Required for Multi-Line so default to On
+!   Refactor some code to improve Debug, and add Debug to make easier to find parsing problems.
+!   Below will cause problems w/o Flatten on old code.
+!      ExecuteSQL PROCEDURE(STRING SQLQuery,  *ANY Out01 , <*ANY Out02>, <*ANY Out03>, <*ANY Out04>, <*ANY Out05>, <*ANY Out06>, <*ANY Out07>, <*ANY Out08>, <*ANY Out09>, <*ANY Out10>, |
+!                           <*ANY Out11>, <*ANY Out12>, <*ANY Out13>, <*ANY Out14>, <*ANY Out15>, <*ANY Out16>, <*ANY Out17>, <*ANY Out18>, <*ANY Out19>, <*ANY Out20>, | 
+!                           <*ANY Out21>, <*ANY Out22>, <*ANY Out23>, <*ANY Out24>, <*ANY Out25>, <*ANY Out26>, <*ANY Out27>, <*ANY Out28>, <*ANY Out29>, <*ANY Out30>, |
+!                           <*ANY Out31>, <*ANY Out32>, <*ANY Out33>, <*ANY Out34>, <*ANY Out35>, <*ANY Out36>, <*ANY Out37>, <*ANY Out38>, <*ANY Out39>, <*ANY Out40>), LONG, PROC
+!
 !March 2024
 !   Bug prototype "Blarg Procedure  (...)" with 2+ spaces before "(" did not clean correctly in CleanCWCode, ignored parms completely
 !   Name('nnn | aaa') containing Pipes now are preserved, but end up in mangled name
@@ -153,14 +166,15 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
                 BUTTON('&Mangle'),AT(25,30,46,12),USE(?MangleBtn),SKIP,ICON(ICON:VCRplay),TIP('Mangle Prototypes'),LEFT
                 BUTTON,AT(6,47,17,16),USE(?PasteButton),SKIP,ICON(ICON:Paste),TIP('Paste Clarion prototype(s) from clipboard'), |
                         FLAT
-                BUTTON,AT(6,63,17,14),USE(?RefreshButton),SKIP,ICON(ICON:VCRplay),TIP('Mangle Prototypes'),FLAT
+                BUTTON,AT(6,67,17,14),USE(?RefreshButton),SKIP,ICON(ICON:VCRplay),TIP('Mangle Prototypes'),FLAT
                 BUTTON,AT(6,86,17,16),USE(?CopyProtoButton),SKIP,ICON(ICON:Copy),TIP('Copy Clarion Prototypes'),FLAT
                 BUTTON,AT(6,111,17,16),USE(?CleanProtoBtn),SKIP,ICON(ICON:JumpPage),TIP('Clean and compress the protypes' & |
                         '<13,10>Mainly a test of the CWClean Procedure Code'),FLAT
                 BUTTON('UPR'),AT(6,134,17,16),USE(?UpperProtoBtn),SKIP,TIP('UPPER CASE Prototypes'),FLAT
                 BUTTON('low'),AT(6,156,17,16),USE(?LowerProtoBtn),SKIP,FONT(,,,FONT:regular),TIP('Lower Case Prototypes'),FLAT
-                BUTTON,AT(6,177,17,16),USE(?LeftJustifyBtn),SKIP,ICON(ICON:VCRtop),TIP('Left Jusify Text'),FLAT
-                TEXT,AT(25,46),FULL,USE(Cwproto),HVSCROLL,FONT('Consolas',11)
+                BUTTON,AT(6,178,17,16),USE(?LeftJustifyBtn),SKIP,ICON(ICON:VCRtop),TIP('Left Jusify Text'),FLAT          
+                BUTTON('Clr'),AT(6,200,17,16),USE(?ClearProtoBtn),SKIP,FONT(,,,FONT:regular),TIP('Clear Prototypes'),FLAT                
+                TEXT,AT(25,46),FULL,USE(Cwproto),HVSCROLL,FONT('Consolas',11)                
                 PROMPT('Indent:'),AT(82,32),USE(?IndentPrompt_1)
                 SPIN(@n3b),AT(107,32,30,10),USE(IndentLevel,, ?IndentLevel_1),HVSCROLL,RANGE(1,20),STEP(1)
                 PROMPT('Ordinal:'),AT(144,32),USE(?OrdinalPrompt_1)
@@ -233,27 +247,27 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
 
 Converter CLASS,TYPE
 Hold        CSTRING(1000)
-IsRaw       BYTE
-NoMangle    BYTE
-IsOmitable  BYTE
-IsAddress   BYTE
-Adims       BYTE
-Convert     PROCEDURE(CONST *CSTRING InLine),STRING
-StoreName   PROCEDURE(string,byte PreserveCase),VIRTUAL         !Carl  added PreserveCase
-StoreSym    PROCEDURE(Byte,byte,string),VIRTUAL
+IsRaw       BYTE                    !RAW Attribute different letters 'c' or 'v'
+NoMangle    BYTE                    !Attributes like PASCAL or C do not mangle 
+IsOmitable  BYTE                    !<Omittable> encodes as 'O',  or 'P' if <*ByAddress> also
+IsAddress   BYTE                    !By *Address encodes as 'R',  or 'P' if <*Omittable> also
+ADims       BYTE                    !Array [] [,] [,,] ... encode as 1 'A' per Dim.
+Convert     PROCEDURE(CONST *CSTRING InPrototypeLine),STRING
+StoreName   PROCEDURE(STRING NameOfSymbol,BYTE PreserveCase),VIRTUAL
+StoreSym    PROCEDURE(BYTE EntityTypeIndex, BYTE BaseTypeIndex, STRING NameOfSymbol),VIRTUAL
 StoreResult PROCEDURE(Byte),VIRTUAL
 StartProc   PROCEDURE,VIRTUAL
 EndProc     PROCEDURE,VIRTUAL
           END
 
 ExpConverter CLASS(Converter)
-!StoreName   PROCEDURE(string,byte PreserveCase=0),VIRTUAL      !Carl PreserveCase to Base Class
-StoreSym    PROCEDURE(Byte,byte,string),VIRTUAL
-StartProc   PROCEDURE,VIRTUAL
+!StoreName   PROCEDURE(STRING NameOfSymbol,byte PreserveCase=0),VIRTUAL
+StoreSym    PROCEDURE(BYTE EntityTypeIndex, BYTE BaseTypeIndex, STRING NameOfSymbol),VIRTUAL
+StartProc   PROCEDURE,VIRTUAL       !Adds '@F' so Exp line starts 'ProcName@F'
           END
 
 CConverter CLASS(Converter)
-StoreSym    PROCEDURE(Byte,byte,string),VIRTUAL
+StoreSym    PROCEDURE(BYTE EntityTypeIndex, BYTE BaseTypeIndex, STRING NameOfSymbol),VIRTUAL
 StartProc   PROCEDURE,VIRTUAL
 EndProc     PROCEDURE,VIRTUAL
           END
@@ -355,7 +369,9 @@ EndProc     PROCEDURE,VIRTUAL
         Tabs2Spaces(CWproto) 
 
         ShowInterfaceMsg = 0
-        Post(Event:Accepted,?MangleBtn)
+        IF ~BAND(KEYSTATE(),0100h) THEN         !08/08/24 CB secret Shift+Click just pastes w/o process
+           Post(Event:Accepted,?MangleBtn)
+        END
     of ?Refreshbutton 
     orof ?RefreshButton2      ;  Post(Event:Accepted,?MangleBtn)
     of ?CopyExportButton      ;  SetClipBoard(ExpProto)
@@ -363,8 +379,9 @@ EndProc     PROCEDURE,VIRTUAL
     of ?CopyProtoButton       ;  SetClipBoard(Cwproto)
     of ?CleanProtoBtn         ;  DO CleanCWProtoRtn     ; DISPLAY 
     of ?UpperProtoBtn         ;  Cwproto=upper(Cwproto) ; DISPLAY !; Post(Event:Accepted,?CWProto)
-    of ?LowerProtoBtn         ;  Cwproto=lower(Cwproto) ; DISPLAY !; Post(Event:Accepted,?CWProto)
+    of ?LowerProtoBtn         ;  Cwproto=lower(Cwproto) ; DISPLAY !; Post(Event:Accepted,?CWProto) 
     of ?LeftJustifyBtn        ;  DO LeftJustifyRtn ; DISPLAY
+    of ?ClearProtoBtn         ;  CLEAR(Cwproto)    ; DISPLAY ; SELECT(?Cwproto)       
     of ?ExpTextEditOk         ;  ?ExpProto{PROP:Color}=CHOOSE(~ExpTextEditOk,COLOR:BTNFACE,COLOR:None) 
                               ;  ?ExpProto{PROP:ReadOnly}=CHOOSE(~ExpTextEditOk) ; DISPLAY 
     of ?ReRunBtn              ;  RUN(COMMAND('0'))
@@ -387,7 +404,7 @@ GetIniRtn ROUTINE
     IniFile = LongPath('.\cbPro2Exp.INI') 
     IndentLevel   = GetINI('Defaults','IndentLevel',    2,IniFile)
     OrdinalColumn = GetINI('Defaults','OrdinalColumn',  0,IniFile) ; IF OrdinalColumn>99 THEN OrdinalColumn=99. !06/21/22 was 60
-    AllowFlatten  = GetINI('Defaults','AllowFlatten',   1,IniFile)
+    AllowFlatten  = 1  !was: GetINI('Defaults','AllowFlatten',   1,IniFile)  !08/08/24 needs to be ON or cannot take Multi-Line so force =1
     ProtoComments = GetINI('Defaults','ProtoComments',  0,IniFile)
     OmitComments  = GetINI('Defaults','OmitComments',   1,IniFile)  !06/21/22 was 0, these are confusing so omit by default
     AddEXPHeader  = GetINI('Defaults','AddEXPHeader',   1,IniFile)
@@ -802,7 +819,6 @@ sz   CSTRING(SIZE(Prfx)+SIZE(xMessage)+3),AUTO
 !-------------------------------
 Converter.StoreName   PROCEDURE(string s,byte PreserveCase)
   CODE
-   ! Self.hold = Clip(s)
     Self.Hold = Clip(choose(~PreserveCase,UPPER(s),s))         !Carl my cwHH prototypes were UPLOW
 
 Converter.StoreSym    PROCEDURE(Byte b,byte b1,string s)
@@ -820,8 +836,8 @@ Converter.StartProc     PROCEDURE
 Converter.Convert PROCEDURE(CONST *CSTRING Ins) !,STRING    !Carl: I'd like to rename INS to InLine but its 25 changes
 Gn       SIGNED,AUTO
 EndP     SIGNED
-Symbol   CSTRING(80)
-SymbolP  SIGNED,AUTO
+Symbol   CSTRING(128)
+SymbolP  SIGNED
 SymVal   BYTE
 TVal     BYTE
 NameX    LONG
@@ -829,11 +845,12 @@ sName    string(255),auto
   CODE
     IF DbIt THEN Db('   ---Convert In=' & Ins).
     Gn = INSTRING('(',ins)
+    IF DbIt THEN Db(' {9} Size(Ins)=' & Size(Ins) &' Len(Ins)=' & Len(Ins) &'  Pos ")"=' & Gn) .
     IF ~Gn THEN
       Self.StoreName(ins,CaseProcName)
       Self.NoMangle = 1
     ELSE
-      Self.StoreName(ins[1:Gn-1],CaseProcName)
+      Self.StoreName(SUB(Ins,1,Gn-1),CaseProcName)  !08/08/24 use SUB() as safer than slice Ins[1:Gn-1] e.g. if Gn=1
       !carl LOOP EndP = LEN(Ins) TO 1 BY -1     searching backwards runs into a NAME() attribute incorrectly
       !carl UNTIL Ins[EndP] = ')'
       LOOP EndP = Gn TO LEN(Ins)
@@ -857,10 +874,13 @@ sName    string(255),auto
     END
     Self.StartProc()
     IF ~Self.NoMangle THEN
-      LOOP UNTIL Ins[Gn] = ')'  
- IF DbIt THEN DB(' {9}Ins=' & Ins) .
-        DO GetSymbol
- IF DbIt THEN DB(' {9}GetSymbol=' & Symbol &'   SymbolP=' & SymbolP) .
+      LOOP
+                                    IF DbIt THEN DB(' {9}DO  GetSymbol Gn='& Gn &' Ins[Gn,20]="' & Sub(Ins,Gn,20) &'"') .
+        IF Gn > EndP     THEN BREAK.    !08/08/24 if not Flatten was going past end of string
+        IF Ins[Gn] = ')' THEN BREAK.    !08/08/24 was above as: LOOP UNTIL Ins[Gn] = ')'  
+        DO GetSymbol                    !FYI increments Gn to scan Ins string, then moves Ins into Symbol and increments SymbolP
+                                    IF DbIt THEN DB(' {9}Did GetSymbol Gn='& Gn &'     Symbol="'& Symbol &'"   SymbolP=' & SymbolP & |
+                                                    '   '& CHOOSE(~Self.IsOmitable,'','<> ') & CHOOSE(~Self.IsAddress,'','* ') & CHOOSE(~Self.ADims,'','[]') ) .
         IF ~Symbol THEN BREAK .
 !        IF INLIST( UPPER(Symbol),'SIGNED','UNSIGNED','BOOL')            !Some Clarion equated Longs
 !             Symbol='LONG'
@@ -896,15 +916,17 @@ sName    string(255),auto
         OF 'ANY' ; TVal = 14    !ANY same as ?
         END 
         Self.StoreSym(SymVal,TVal,Symbol) ! 1         2         3         4        5        6         7         8       9         10
-      END                                 !11        12        13        14       15       16        17        18      19         20
-    END
-    Self.EndProc
+      END   !LOOP Gn Thru Ins             !11        12        13        14       15       16        17        18      19         20
+
+    END     !IF ~NoMangle
+    Self.EndProc()
     IF DbIt THEN Db('   ---Convert Return=' & Self.Hold).
     RETURN Self.Hold
 
 ! Gn comes in pointing to last seperator;  Exits pointing to next seperator;  Symbol has type name from prototype
 GetSymbol ROUTINE 
   LOOP                        !Remove leading spaces
+    IF Gn+1 > EndP THEN BREAK.                !08/08/24 check for > EndP then no more Symbol
     Gn += 1
   WHILE Ins[Gn]= ' '
   IF UPPER(SUB(Ins,Gn,6))='CONST ' THEN Gn += 6.    !10/22/17 Skip over CONST in (CONST *STRING S) so not a NAME Type
@@ -927,21 +949,27 @@ GetSymbol ROUTINE
   SymbolP = 1
   LOOP UNTIL INSTRING(Ins[Gn],',= >)[')     !Find Symbol NAME in (TYPE SymNAME)
     Symbol[SymbolP] = Ins[Gn]
+    IF Gn+1 > EndP THEN BREAK.              !08/08/24 check for > EndP then no more Symbol else 'Index of of Range'
     Gn += 1
+    IF SymbolP >= SIZE(Symbol) THEN EXIT.   !08/08/24 protect from overrun Symbol
     SymbolP += 1
+    ASSERT(Gn      <= SIZE(Ins)   ,'Gn=' & Gn           &' > Size(Ins) '& Size(Ins)        &' <13,10>Ins='& Ins )       !08/08/24 bad index here
+    ASSERT(SymbolP <= SIZE(Symbol),'SymbolP=' & SymbolP &' > Size(Symbol) '& Size(Symbol)  &' <13,10>Symbol='& Symbol )
   END
   Symbol[SymbolP] = '<0>' 
 
-  Self.Adims = 0
+  Self.ADims = 0
   IF Ins[Gn]='[' THEN       !Found Array[] 
-    Self.Adims += 1         !10/22/17 the "[" gets you 1 "A"
+    Self.ADims += 1         !10/22/17 the "[" gets you 1 "A"
     LOOP
-      !10/22/17 Self.Adims += 1     ![space] was being counted so [ ] => AA
+      !10/22/17 Self.ADims += 1     ![space] was being counted so [ ] => AA
+      IF Gn+1 > EndP THEN BREAK.                !08/08/24
       Gn+=1  
-      IF Ins[Gn] = ',' THEN Self.Adims += 1.    !10/22/17 each "," gets you +1 "A"
+      IF Ins[Gn] = ',' THEN Self.ADims += 1.    !10/22/17 each "," gets you +1 "A"
     UNTIL Ins[Gn] = ']'
   END
   LOOP UNTIL INSTRING(Ins[Gn],',)')
+    IF Gn+1 > EndP THEN BREAK.              !08/08/24 check for > EndP then no more Symbol else 'Index of of Range'  
     Gn += 1
   END
 
@@ -950,45 +978,49 @@ GetSymbol ROUTINE
 !    Self.Hold = Clip(choose(~CaseProcName,UPPER(Nam),Nam))         !Carl my cwHH prototypes were UPLOW
 
 ExpConverter.StoreSym    PROCEDURE(Byte EVal,Byte TVal,string symbol)
+Mangling1 PSTRING(128)      !08/09/24 refactor to use Local Var for debug instead of "Self.Hold=Self.Hold &" in all lines
   CODE
-    !    IF DbIt THEN DB('StoreSym Symbol=' & Symbol & ' TVal=' & TVal & 'EVal=' & EVal ).
+    !    IF DbIt THEN DB(' {9}Exp.StoreSym (EntityVal='& EVal &' TypeVal='& TVal &' Symbol='& Symbol &')').
     IF EVal THEN                              !  1   2   3   4   5   6   7   8
-      Self.Hold = Self.Hold & 'B' & CHOOSE(EVal,'f','b','k','q','r','w','i','a')
+      Mangling1 = Mangling1 & 'B' & CHOOSE(EVal,'f','b','k','q','r','w','i','a')                !E.g. Bf->FILE  Bw->WINDOW
     ELSIF TVal THEN
       DO Preamble                        ! 1    2   3    4    5    6    7    8     9    10
-      Self.Hold = Self.Hold & CHOOSE(TVal,'Uc','s','l' ,'Us','Ul','f' ,'d' ,'bd' ,'bt','e',|
+      Mangling1 = Mangling1 & CHOOSE(TVal,'Uc','s','l' ,'Us','Ul','f' ,'d' ,'bd' ,'bt','e',|    !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL
                                           'p','b4','b8','u' ,'sb','sp','',  '',   'sw','sa')
       CASE UPPER(Symbol)
       OF 'CSTRING'
-        Self.Hold = Self.Hold & CHOOSE(Self.IsRaw,'c','sc')
+        Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'c','sc')
       OF 'GROUP'
-        Self.Hold = Self.Hold & CHOOSE(Self.IsRaw,'v','g')
+        Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'v','g')
       END
     ELSE
       !This is some Named Symbol
-      Self.Hold = Self.Hold & LEN(Symbol) & choose(~CaseSelfName,UPPER(Symbol),Symbol)      !Carl If Self is preserved then do all the parms
+      Mangling1 = Mangling1 & LEN(Symbol) & choose(~CaseSelfName,UPPER(Symbol),Symbol)      !Carl If Self is preserved then do all the parms
       if ~instring(' ' & CLIP(UPPER(Symbol)) & ' ',NamedSymbolList,1)
           NamedSymbolList=clip(NamedSymbolList) &' '& Symbol                    !A list so I can spot bad symbol names or missed equates
       end
     END
-    IF DbIt THEN DB(' {9}StoreSym Self.Hold=' & Self.Hold ) .
+    Self.Hold = Self.Hold & Mangling1                                           !08/09/24 refactor to use Local Var
+    IF DbIt THEN DB(' {9}Exp.StoreSym "' & Mangling1 &'" .Hold=' & Self.Hold ) .
 
 Preamble ROUTINE
-  IF Self.IsAddress OR Self.Adims THEN
-    Self.Hold = Self.Hold & CHOOSE(Self.IsOmitable,'P','R')
+  IF Self.IsAddress OR Self.ADims THEN
+    Mangling1 = Mangling1 & CHOOSE(Self.IsOmitable,'P','R')
   ELSIF Self.IsOmitable THEN
-    Self.Hold = Self.Hold & 'O'
+    Mangling1 = Mangling1 & 'O'
   END
-  IF Self.Adims THEN
-    Self.Hold = Self.Hold & ALL('A',Self.Adims)
+  IF Self.ADims THEN
+    Mangling1 = Mangling1 & ALL('A',Self.ADims)
   END
-
+!-----------------------------------
 ExpConverter.StartProc     PROCEDURE
   CODE
     IF Self.NoMangle < 2 THEN
       Self.Hold = Self.Hold & '@F'
     END
 
+
+!-- C Prototype Code Encode --------------------------------------------
 CConverter.StoreSym    PROCEDURE(Byte EVal, Byte TVal,string symbol)
 I UNSIGNED,AUTO
   CODE
@@ -1000,7 +1032,7 @@ I UNSIGNED,AUTO
       Self.Hold = Self.Hold & CHOOSE(EVal,'void *','void *,unsigned bnum','void *','void *','unsigned','unsigned','void *','unsigned','**MORE**')
     ELSE
       IF TVal THEN
-        LOOP I = 1 TO Self.Adims
+        LOOP I = 1 TO Self.ADims
           Self.Hold = Self.Hold & 'unsigned dim' & I & ','
           Self.IsAddress = 1
         END
@@ -1058,6 +1090,7 @@ CConverter.EndProc     PROCEDURE
   CODE
     Self.Hold = Self.Hold & ')'
 
+!===================================================================================================
 FlattenProtoTypes Procedure(*CSTRING InOutPrototypes)
 pPrototypes    CString(MaxProto+1)  !InOut Prototypes with the Pipes in Name('x|x') hidden so they are not used to flatten
 FlatPrototypes CString(MaxProto+1)
