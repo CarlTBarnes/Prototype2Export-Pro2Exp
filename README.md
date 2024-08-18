@@ -22,11 +22,20 @@ Check the "; Proto" box to have comment lines inserted into the EXP showing the 
 
 ---
 
-### EXPORT Attribute on Data and Prototypes
+### EXPORT Attribute on Procedure Prototypes and Data
 
-Read the "7.1 EXPORT" tab and below blog for information on the new EXPORT declaration.
+This tool has a "7.1 EXPORT" tab with details on how to use this new language feature to export without having to add mangled lines to the EXP file.
 
-http://clarionsharp.com/blog/71-preliminary-release-notes-and-a-happy-thanksgiving
+It is nice to have all the exports listed in the EXP file as a text file you can search for which DLL exports a certain function.
+ A tip is to use the new EXPORT to generate the mangled name. You can find the mangled name(s) using LibMaker on the DLL or LIB. Add that mangled name to the EXP.
+ You must remove the EXPORT attribute or you'll have a duplicate error.
+ There are some complicated mangled names that using EXPORT you know the compiler will always be 100% correct, like named Procedure Types.
+
+Read the below blog and Clarion Hub links for information on the new EXPORT declaration.
+
+https://ClarionHub.com/t/Unknown-Feature-EXPORT-Attribute-Instead-of-EXP-File/5570?u=carlbarnes
+
+http://ClarionSharp.com/Blog/71-Preliminary-Release-Notes-and-A-Happy-Thanksgiving
 
 FEATURE:
 New attribute for procedure prototypes and static variables declarations: EXPORT.
