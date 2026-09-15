@@ -3,6 +3,10 @@
 
   PROGRAM
 !Region History Comments
+!September 15, 2026
+!    Clarion 12 Beta with USTRING and DATETIME. 
+!       As of 12.0.14313 UString choice if zu/su I'm hoping SV will change
+!
 !August 8, 2024
 !   Add a "CLR" button to Clear all my Examples. Shift+Paste button does NOT DO Mangle.
 !   Bug "Index out of Range" with Multi-Line prototype and Flatten unchecked. 
@@ -482,8 +486,8 @@ SemiPos     ushort
              pCRLF='<13,10>'                                                        !10/23/17 
           END 
           ExpProto = ExpProto & pCRLF & All(' ',IndentLevel) & |
-                     line2add[1 : llen] & Choose(OrdColAdj <= llen,' ','') & ALL(' ',OrdColAdj - llen) & '@?'
-                     !line2add[1 : llen] & Choose(OrdinalColumn <= llen,' ','') & ALL(' ',OrdinalColumn - llen) & '@?'
+                     line2add[1 : llen] & Choose(OrdColAdj - llen<2,' ', ALL(' ',OrdColAdj - llen)) & '@?'  !This ALL() can be negative
+!Negative ALL        line2add[1 : llen] & Choose(OrdColAdj <= llen,' ','') & ALL(' ',OrdColAdj - llen) & '@?'  !This ALL() can be negative
     end
     return
 
@@ -911,13 +915,14 @@ sName    string(255),auto
         END
         
         TVal = INLIST(UPPER(Symbol),     'BYTE',    'SHORT',  'LONG',   'USHORT','ULONG', 'SREAL',  'REAL',   'DATE', 'TIME',   'DECIMAL',|
-                                         'PDECIMAL','BFLOAT4','BFLOAT8','?',     'STRING','PSTRING','CSTRING','GROUP','BSTRING','ASTRING')
+                                         'PDECIMAL','BFLOAT4','BFLOAT8','?',     'STRING','PSTRING','CSTRING','GROUP','BSTRING','ASTRING',|
+                                         'USTRING' )
         CASE UPPER(Symbol) 
         OF 'ANY' ; TVal = 14    !ANY same as ?
         END 
         Self.StoreSym(SymVal,TVal,Symbol) ! 1         2         3         4        5        6         7         8       9         10
       END   !LOOP Gn Thru Ins             !11        12        13        14       15       16        17        18      19         20
-
+                                          !21
     END     !IF ~NoMangle
     Self.EndProc()
     IF DbIt THEN Db('   ---Convert Return=' & Self.Hold).
@@ -986,12 +991,12 @@ Mangling1 PSTRING(128)      !08/09/24 refactor to use Local Var for debug instea
     ELSIF TVal THEN
       DO Preamble                        ! 1    2   3    4    5    6    7    8     9    10
       Mangling1 = Mangling1 & CHOOSE(TVal,'Uc','s','l' ,'Us','Ul','f' ,'d' ,'bd' ,'bt','e',|    !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL
-                                          'p','b4','b8','u' ,'sb','sp','',  '',   'sw','sa')
-      CASE UPPER(Symbol)
-      OF 'CSTRING'
-        Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'c','sc')
-      OF 'GROUP'
-        Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'v','g')
+                                          'p','b4','b8','u' ,'sb','sp','',  '',   'sw','sa',|
+                                          '')   !USTRING zu/su cannot be done here like EVERY other mangle :(
+                                          CASE UPPER(Symbol)
+      OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Hope this will change to "sz" for both
+      OF 'CSTRING' ; Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'c','sc')
+      OF 'GROUP'   ; Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'v','g')
       END
     ELSE
       !This is some Named Symbol
@@ -1197,6 +1202,7 @@ ChNdx    long
 
 !    EquQ:LabelType='DWORD' ;  EquQ:ClaType='ULONG' ;  add(EquateTypeQ)        !This might not always be so maybe I shouldn't and make user Equate
     EquQ:LabelType='WORD' ;  EquQ:ClaType='USHORT' ;  add(EquateTypeQ)
+    EquQ:LabelType='DATETIME' ;  EquQ:ClaType='DECIMAL' ; add(EquateTypeQ)     !12.0.14313 DateTime is Decimal(19,7)
 
     loop ChNdx = 1 to records(EquateTypeQ)                  !make sure they are all UPPER as it is assumed by other code
          GET(EquateTypeQ,ChNdx)
@@ -1210,7 +1216,10 @@ ChNdx    long
 
 LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRING Cw71z)  !Move big strings to bottom
     CODE
-    Protoz ='StringPass  PROCEDURE(STRING S1, *STRING S2, <<STRING S3>, <<*STRING S4>)' &|
+    Protoz ='UStringPass  PROCEDURE(USTRING U1, *USTRING U2, <<USTRING U3>, <<*USTRING U4>, *USTRING[] U5)' &|
+     '<13,10>DateAndTime1 PROCEDURE(*DATETIME DT1, <*DATETIME DT2>, *DATE D1,<*DATE D2>, *TIME T1,<*TIME T2>)' &|
+     '<13,10>DateAndTime2 PROCEDURE(*DECIMAL DT1,  <*DECIMAL DT2>,  *LONG D1,<*LONG D2>, *LONG T1,<*LONG T2>)' &|
+     '<13,10>StringPass  PROCEDURE(STRING S1, *STRING S2, <<STRING S3>, <<*STRING S4>, *STRING[] S5)' &|
      '<13,10>PassArray   PROCEDURE(*LONG[,] A2dim) ' &|
      '<13,10>CityStZip   PROCEDURE(STRING CSZ, *STRING City,*STRING State,*STRING Zip,BYTE ' &|
      'Plus4=1),STRING' &|
@@ -1238,8 +1247,7 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>Match              PROCEDURE(CONST *CSTRING),BOOL' &|
      '<13,10>HelpCmd            PROCEDURE(UNSIGNED, <<CONST *CSTRING>, UNSIGNED, LONG=0),BOOL,PROC' &|
      '<13,10>                 END'
-
-
+    
     Cw71z = 'You don''t have to use a tool like this to mangle prototypes ' &|
      'and edit an EXP file, but IMO most developers still prefer to have an EXP file to see exports. ' &|
      'Also there is no _flag_ for EXPORT(_flag_) so to have one INC file allow both Export and External requires using Omit/Compile. ' &|
@@ -1364,6 +1372,7 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>DATE         bd               long' &|
      '<13,10>TIME         bt               long' &|
      '<13,10>DECIMAL      e                char *       w/o RAW: unsigned len,char *' &|
+     '<13,10>DATETIME     e                             Clarion Beta 12.0.14313 DateTime Type is DECIMAL(19,7)' &|
      '<13,10>PDECIMAL     p                char *       w/o RAW: unsigned len,char *' &|
      '<13,10>SREAL        f                float' &|
      '<13,10>REAL         d                double' &|
@@ -1379,6 +1388,7 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>PSTRING      sp               char *       w/o RAW: unsigned len,char *' &|
      '<13,10>ASTRING      sa' &|
      '<13,10>BSTRING      sw' &|
+     '<13,10>USTRING      zu /su           Clarion 12.0.1429 Beta' &|
      '<13,10>INT          i                32-bit Integer seen only in C Prototypes' &|
      '<13,10>PROCEDURE    Fmangle_         TYPE procedure => "F" + "prototype mangle" + "_"' &|
      '<13,10>' &|
@@ -1418,7 +1428,12 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10><<ASTRING>      Osa' &|
      '<13,10>*ASTRING       Rsa' &|
      '<13,10><<*ASTRING>     Psa' &|
-     '<13,10>' &|
+     '<13,10>' &| 
+     '<13,10>USTRING        zu     Clarion 12 Beta Wide String 12.0.14313' &|
+    '<13,10><<USTRING>      Ozu    "zu" inconsistent with "su"' &|
+     '<13,10>*USTRING       Rsu    "su" conflicts with (*SHORT,ANY)' &|
+    '<13,10><<*USTRING>     Psu    Hope SV changes to "sz" for both' &|
+     '<13,10>' &|     
      '<13,10>Miscellaneous -------------------' &|
      '<13,10>CONST has no affect on Clarion Mangle, it does affect C mangling, see below.' &|
      '<13,10>' &|
@@ -1456,12 +1471,13 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>    DATAFILE$TYPE$DAF:RECORD' &|
      '<13,10>' &|
      '<13,10>' &|
-     '<13,10>Value-Types:' &|
-     '<13,10>   BYTE  SHORT  USHORT  LONG  ULONG  SREAL  REAL  DATE  TIME  STRING  BSTRING  ASTRING' &|
+     '<13,10>Value-Types (or "O" if <<omittble>):' &|
+     '<13,10>   BYTE  SHORT  USHORT  LONG  ULONG  SREAL  REAL  DATE  TIME  STRING  ASTRING  BSTRING  USTRING' &|
      '<13,10>' &|
      '<13,10>Address "R" Types (or "P" if <<omittble>):' &|
      '<13,10>   *BYTE  *SHORT  *USHORT  *LONG  *ULONG  *SREAL  *REAL  *BFLOAT4  *BFLOAT8' &|
-     '<13,10>   *DECIMAL  *PDECIMAL   *DATE   *TIME  *STRING  *PSTRING  *CSTRING  *GROUP  *BSTRING  *ASTRING' &|
+     '<13,10>   *DECIMAL  *PDECIMAL  *DATE     *TIME   *DATETIME ' &|
+     '<13,10>   *STRING   *PSTRING   *CSTRING  *GROUP  *ASTRING  *BSTRING  *USTRING' &|
      '<13,10>' &|
      '<13,10>Entity-parameters "B" Types:' &|
      '<13,10>   FILE   VIEW   KEY   INDEX   QUEUE   WINDOW   REPORT   BLOB' &|
