@@ -13,6 +13,7 @@
 !    Add EncodeClarion Class to split out Type to Mangle logic.
 !    Add Mangling column to Type Queue. So far only user of EncodeClarion Class.
 !    Refactor code in Converter .Convert() and .StoreSym() to use EncodeClarion class
+!    Types tab list add click on column header sorting using C9 PROPLIST:HasSortColumn and EVENT:HeaderPressed
 !
 !August 8, 2024
 !   Add a "CLR" button to Clear all my Examples. Shift+Paste button does NOT DO Mangle.
@@ -329,7 +330,8 @@ EndProc     PROCEDURE,DERIVED
     ?CaseProcName_1 {PROP:Tip}=?CaseProcName {PROP:Tip}
     ?CaseClassName_1{PROP:Tip}=?CaseClassName{PROP:Tip} 
     ?CaseSelfName_1 {PROP:Tip}=?CaseSelfName {PROP:Tip}
-  
+    ?LIST:EquateTypeQ{PROPLIST:HasSortColumn}=1
+
   SELECT(?CWProto)
   ACCEPT
     CASE ACCEPTED()
@@ -435,6 +437,18 @@ EndProc     PROCEDURE,DERIVED
     OF Event:CloseWindow    ;  DO PutIniRtn
     OF Event:Rejected       ;  DISPLAY(?) ; SELECT(?)
     END
+    CASE FIELD()
+    OF ?LIST:EquateTypeQ
+       CASE EVENT()
+       OF EVENT:HeaderPressed
+          CASE ?LIST:EquateTypeQ{PROPList:MouseDownField}
+          OF 1 ; SORT(EquateTypeQ,EquQ:LabelType)
+          OF 2 ; SORT(EquateTypeQ,EquQ:ClaType,EquQ:MangleType,EquQ:LabelType)
+          OF 3 ; SORT(EquateTypeQ,EquQ:Mangling,EquQ:ClaType,EquQ:LabelType)
+          OF 4 ; SORT(EquateTypeQ,EquQ:Comments,EquQ:ClaType,EquQ:LabelType)
+          END
+       END 
+    END    
   END
   RETURN 
 
