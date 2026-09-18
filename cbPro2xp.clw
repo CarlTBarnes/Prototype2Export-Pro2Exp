@@ -9,7 +9,10 @@
 !    Add Types Tab to show EquateTypeQ Queue of Type Translation
 !    Improve EquateTypeQ with Comments to make easier to understand 
 !    Move "BOOL SIGNED UNSIGNED" to list of Clarion Types
-!    Show error message if "NewType Equate(ClaType)" does not find ClaType in Equates Q
+!    Show error message if "NewType Equate(ClaType)" does not find ClaType in Equates Q 
+!    Add EncodeClarion Class to split out Type to Mangle logic.
+!    Add Mangling column to Type Queue. So far only user of EncodeClarion Class.
+!    Refactor code in Converter .Convert() and .StoreSym() to use EncodeClarion class
 !
 !August 8, 2024
 !   Add a "CLR" button to Clear all my Examples. Shift+Paste button does NOT DO Mangle.
@@ -163,7 +166,7 @@ pInterfaceSelf  pstring(255),static     !name of Interface to add to the prototy
 EquateTypeQ     QUEUE,PRE(EquQ)         !07/15/2007  Allow equates for other types to be in the pasted code
 LabelType          string(64)           !The type that the developer called it
 MangleType         string(64)           !Blank if the Same as ClaType
-Mangling           string(4)            !Mangled Type
+Mangling           string(5)            !Mangled Type
 Comments           string(128)          !Info on what its about
 ClaType            string(64)           !aka Clarion type, the longest is probably APPLICATION
                 END
@@ -261,7 +264,7 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
                         USE(?TypesListFTY),TRN
                 LIST,AT(8,33),FULL,USE(?LIST:EquateTypeQ),VSCROLL,FONT('Consolas',11),VCR, |
                         FROM(EquateTypeQ),FORMAT('72L(2)|M~Parameter Type~@s64@?62L(2)|M~Mangle Type' & |
-                        '~@s64@34C|M~Mangle~@s4@100L(2)~Comments~@s128@')           
+                        '~@s64@34C|M~Mangle~@s5@100L(2)~Comments~@s128@')           
             END
             TAB('  About  '),USE(?TabAbout)
                 TEXT,AT(8,22),FULL,USE(AboutTxt),VSCROLL,FONT('Calibri',11,COLOR:Black),COLOR(0E1FFFFH),READONLY
@@ -865,46 +868,49 @@ sz   CSTRING(SIZE(Prfx)+SIZE(xMessage)+3),AUTO
   OutputDebugString( sz )
   return
 
-!=======================================================================================  
-EncodeClarion.SymbolToMangle4Q    PROCEDURE(STRING Symbol)
-SymVal   BYTE
-TVal     BYTE
+!=======================================================================================
+EncodeClarion.SymbolToMangle4Q  PROCEDURE(STRING Symbol)
+SymVal  BYTE
+TVal    BYTE
+Mangle  STRING(8)
     CODE
     SELF.Symbol_To_SymValTVal(Symbol, SymVal, TVal)       !Calc SymVal, TVal
-    RETURN SELF.Encode_SymVal_TVal(Symbol, SymVal, TVal, 0)  !Lookup SymVal, TVal to find Mangle
-    
+    Mangle = SELF.Encode_SymVal_TVal(Symbol, SymVal, TVal, 0)  !Lookup SymVal, TVal to find Mangle
+    IF ~Mangle AND Symbol='USTRING' THEN Mangle='zu/su'.    !Just for Queue
+    RETURN Mangle
+
 EncodeClarion.Symbol_To_SymValTVal  PROCEDURE(STRING Symbol, *BYTE SymVal, *BYTE TVal)
     CODE
     Symbol=UPPER(Symbol)
                           ! 1 Bf      2 Bb      3 Bk  4 Bq    5 Br     6 Bw      7 Bi   8 Ba
-    SymVal = INLIST(Symbol,'FILE',   'BLOB',   'KEY','QUEUE','REPORT','WINDOW', 'VIEW','APPLICATION') 
+    SymVal = INLIST(Symbol,'FILE',   'BLOB',   'KEY','QUEUE','REPORT','WINDOW', 'VIEW','APPLICATION')
     CASE Symbol
     OF 'INDEX' ; SymVal = 3 !INDEX same as KEY
-    END    
+    END                  ! 1          2         3         4        5        6         7         8       9         10
     TVal = INLIST(Symbol, 'BYTE',    'SHORT',  'LONG',   'USHORT','ULONG', 'SREAL',  'REAL',   'DATE', 'TIME',   'DECIMAL',|
-                          'PDECIMAL','BFLOAT4','BFLOAT8','?',     'STRING','PSTRING','CSTRING','GROUP','BSTRING','ASTRING',|
-                          'USTRING' )    !Note DATETIME is DECIMAL
-    CASE Symbol
+                          'PDECIMAL','BFLOAT4','BFLOAT8',   '?',  'STRING','PSTRING','CSTRING','GROUP','BSTRING','ASTRING',|
+                          'USTRING' ) !    12        13     14     15       16        17        18      19        20
+    CASE Symbol             !FYI:  DATETIME is DECIMAL
     OF 'ANY' ; TVal = 14    !ANY same as ?
     END
-    RETURN 
+    RETURN
 
-EncodeClarion.Encode_SymVal_TVal    PROCEDURE(STRING Symbol, Byte EVal,Byte TVal, BYTE IsRaw) !,STRING
+EncodeClarion.Encode_SymVal_TVal  PROCEDURE(STRING Symbol, Byte EVal,Byte TVal, BYTE IsRaw) !,STRING
 Mangling1 PSTRING(8)
     CODE
     IF EVal THEN             !  1    2    3    4    5    6    7    8
       Mangling1 = CHOOSE(EVal,'Bf','Bb','Bk','Bq','Br','Bw','Bi','Ba')     !E.g. Bf->FILE  Bw->WINDOW
 
-    ELSIF TVal THEN          ! 1    2    3    4    5    6    7   8    9    10           
+    ELSIF TVal THEN          ! 1    2    3    4    5    6    7   8    9    10
       Mangling1 = CHOOSE(TVal,'Uc','s' ,'l' ,'Us','Ul','f' ,'d','bd','bt','e' ,|  !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL DATE TIME DECIMAL
                               'p' ,'b4','b8','u' ,'sb','sp','' , '' ,'sw','sa',|  !     PDECIMAL BFLOAT4 BFLOAT8 ANY STRING PString BString AString
-                              'sz')   !USTRING is "zu/su" assume sz
+                              '')   !USTRING is "zu/su" hope for sz
       CASE UPPER(Symbol)
-     ! OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Hope this will change to "sz" for both
+    ! OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Done by Caller
       OF 'CSTRING' ; Mangling1 = Mangling1 & CHOOSE(IsRaw,'c','sc')
       OF 'GROUP'   ; Mangling1 = Mangling1 & CHOOSE(IsRaw,'v','g')
       END
-    END     
+    END
     RETURN Mangling1
 !=======================================================================================
 
@@ -981,21 +987,10 @@ sName    string(255),auto
             IF DbIt THEN DB(' {9}Equate Lookup ' & Symbol & ' ==> ' &  EquQ:ClaType ) .
             Symbol = EquQ:ClaType                                       !then the real type is LONG
         END                          
-                                     ! 1 Bf      2 Bb      3 Bk  4 Bq    5 Br     6 Bw      7 Bi   8 Ba
-        SymVal = INLIST(UPPER(Symbol),'FILE',   'BLOB',   'KEY','QUEUE','REPORT','WINDOW', 'VIEW','APPLICATION') 
-        CASE UPPER(Symbol)
-        OF 'INDEX' ; SymVal = 3 !INDEX same as KEY
-        END
-        
-        TVal = INLIST(UPPER(Symbol),     'BYTE',    'SHORT',  'LONG',   'USHORT','ULONG', 'SREAL',  'REAL',   'DATE', 'TIME',   'DECIMAL',|
-                                         'PDECIMAL','BFLOAT4','BFLOAT8','?',     'STRING','PSTRING','CSTRING','GROUP','BSTRING','ASTRING',|
-                                         'USTRING' )
-        CASE UPPER(Symbol) 
-        OF 'ANY' ; TVal = 14    !ANY same as ?
-        END 
-        Self.StoreSym(SymVal,TVal,Symbol) ! 1         2         3         4        5        6         7         8       9         10
-      END   !LOOP Gn Thru Ins             !11        12        13        14       15       16        17        18      19         20
-                                          !21
+        EncodeClarion.Symbol_To_SymValTVal(Symbol,SymVal,TVal)  !E.g. Lookup FILE return SymVal=1, for BYTE TVal=1
+        Self.StoreSym(SymVal,TVal,Symbol)
+      END   !LOOP Gn Thru Ins
+
     END     !IF ~NoMangle
     Self.EndProc()
     IF DbIt THEN Db('   ---Convert Return=' & Self.Hold).
@@ -1057,22 +1052,20 @@ GetSymbol ROUTINE
 
 ExpConverter.StoreSym    PROCEDURE(Byte EVal,Byte TVal,string symbol)
 Mangling1 PSTRING(128)      !08/09/24 refactor to use Local Var for debug instead of "Self.Hold=Self.Hold &" in all lines
+EncodeST  PSTRING(128)      !09/18/26 EncodeClarion Class
   CODE
     !    IF DbIt THEN DB(' {9}Exp.StoreSym (EntityVal='& EVal &' TypeVal='& TVal &' Symbol='& Symbol &')').
-    IF EVal THEN                              !  1   2   3   4   5   6   7   8
-      Mangling1 = Mangling1 & 'B' & CHOOSE(EVal,'f','b','k','q','r','w','i','a')                !E.g. Bf->FILE  Bw->WINDOW
+    EncodeST = EncodeClarion.Encode_SymVal_TVal(Symbol,EVal,TVal,Self.IsRaw)  !Lookup EVal / TVal to Encode Mangling
+    IF EVal THEN
+      Mangling1 = Mangling1 & EncodeST  !Was: 'B' & CHOOSE(EVal,'f','b','k','q','r','w','i','a') 
     ELSIF TVal THEN
-      DO Preamble                        ! 1    2   3    4    5    6    7    8     9    10
-      Mangling1 = Mangling1 & CHOOSE(TVal,'Uc','s','l' ,'Us','Ul','f' ,'d' ,'bd' ,'bt','e',|    !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL
-                                          'p','b4','b8','u' ,'sb','sp','',  '',   'sw','sa',|
-                                          '')   !USTRING zu/su cannot be done here like EVERY other mangle :(
+      DO Preamble   !Add R=*Address  P=<*Omit Add>  O=<Omit Value>  AAA Array[]
+      Mangling1 = Mangling1 & EncodeST  !Was: CHOOSE(TVal,'Uc','s','l' ,'Us','Ul','f' ,'d' ,'bd' ,'bt','e','p','b4','b8','u' ,'sb','sp'...
       CASE UPPER(Symbol)
       OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Hope this will change to "sz" for both
-      OF 'CSTRING' ; Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'c','sc')
-      OF 'GROUP'   ; Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'v','g')
       END
     ELSE
-      !This is some Named Symbol
+      !This is some Named Symbol encode as  ##NAME where ## is the Length
       Mangling1 = Mangling1 & LEN(Symbol) & choose(~CaseSelfName,UPPER(Symbol),Symbol)      !Carl If Self is preserved then do all the parms
       if ~instring(' ' & CLIP(UPPER(Symbol)) & ' ',NamedSymbolList,1)
           NamedSymbolList=clip(NamedSymbolList) &' '& Symbol                    !A list so I can spot bad symbol names or missed equates
@@ -1081,7 +1074,7 @@ Mangling1 PSTRING(128)      !08/09/24 refactor to use Local Var for debug instea
     Self.Hold = Self.Hold & Mangling1                                           !08/09/24 refactor to use Local Var
     IF DbIt THEN DB(' {9}Exp.StoreSym "' & Mangling1 &'" .Hold=' & Self.Hold ) .
 
-Preamble ROUTINE
+Preamble ROUTINE   !Add R=*Address  P=<*Omit Add>  O=<Omit Value>  AAA Array[]
   IF Self.IsAddress OR Self.ADims THEN
     Mangling1 = Mangling1 & CHOOSE(Self.IsOmitable,'P','R')
   ELSIF Self.IsOmitable THEN
@@ -1242,10 +1235,6 @@ X LONG
 
 
 Load_EquateTypeQ    procedure()               !Load EquateTypeQ
-!    EquateTypeQ     QUEUE,PRE(EquQ)
-!    EquQ:LabelType          string(64)          !The type that the developer called it
-!    EquQ:ClaType            string(64)          !aka Clarion type, the longest is probably APPLICATION
-!                    END
     !Make these load from a file, or allow some to load from a file
 ChNdx    long
     code
