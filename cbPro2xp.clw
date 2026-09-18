@@ -163,6 +163,7 @@ pInterfaceSelf  pstring(255),static     !name of Interface to add to the prototy
 EquateTypeQ     QUEUE,PRE(EquQ)         !07/15/2007  Allow equates for other types to be in the pasted code
 LabelType          string(64)           !The type that the developer called it
 MangleType         string(64)           !Blank if the Same as ClaType
+Mangling           string(4)            !Mangled Type
 Comments           string(128)          !Info on what its about
 ClaType            string(64)           !aka Clarion type, the longest is probably APPLICATION
                 END
@@ -259,8 +260,8 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
                         'entry you can specify "TYPE EQUATE(BaseType)" to add to this list'),AT(8,20), |
                         USE(?TypesListFTY),TRN
                 LIST,AT(8,33),FULL,USE(?LIST:EquateTypeQ),VSCROLL,FONT('Consolas',11),VCR, |
-                        FROM(EquateTypeQ),FORMAT('72L(2)|M?~Parameter Type~L(2)@s64@62L(2)|M~Mangle ' & |
-                        'Type~L(2)@s64@100L(2)~Comments~L(2)@s128@')           
+                        FROM(EquateTypeQ),FORMAT('72L(2)|M~Parameter Type~@s64@?62L(2)|M~Mangle Type' & |
+                        '~@s64@34C|M~Mangle~@s4@100L(2)~Comments~@s128@')           
             END
             TAB('  About  '),USE(?TabAbout)
                 TEXT,AT(8,22),FULL,USE(AboutTxt),VSCROLL,FONT('Calibri',11,COLOR:Black),COLOR(0E1FFFFH),READONLY
@@ -284,16 +285,22 @@ StartProc   PROCEDURE,VIRTUAL
 EndProc     PROCEDURE,VIRTUAL
           END
 
-ExpConverter CLASS(Converter)
+EncodeClarion    CLASS   !---- Mangle code moved so it can be reused elsewhere like Type Q -----
+SymbolToMangle4Q      PROCEDURE(STRING Symbol),STRING       !For Q not true Mangle
+Symbol_To_SymValTVal  PROCEDURE(STRING InSymbol, *BYTE OutSymVal, *BYTE OutTVal)
+Encode_SymVal_TVal    PROCEDURE(STRING InSymbol, BYTE inEVal, Byte inTVal, BYTE IsRaw=0),STRING
+                 END
+
+ExpConverter CLASS(Converter)   !For Clarion EXP Mangle
 !StoreName   PROCEDURE(STRING NameOfSymbol,byte PreserveCase=0),VIRTUAL
-StoreSym    PROCEDURE(BYTE EntityTypeIndex, BYTE BaseTypeIndex, STRING NameOfSymbol),VIRTUAL
-StartProc   PROCEDURE,VIRTUAL       !Adds '@F' so Exp line starts 'ProcName@F'
+StoreSym    PROCEDURE(BYTE EntityTypeIndex, BYTE BaseTypeIndex, STRING NameOfSymbol),DERIVED
+StartProc   PROCEDURE,DERIVED       !Adds '@F' so Exp line starts 'ProcName@F'
           END
 
-CConverter CLASS(Converter)
-StoreSym    PROCEDURE(BYTE EntityTypeIndex, BYTE BaseTypeIndex, STRING NameOfSymbol),VIRTUAL
-StartProc   PROCEDURE,VIRTUAL
-EndProc     PROCEDURE,VIRTUAL
+CConverter CLASS(Converter)     !For C/C++ Mangle
+StoreSym    PROCEDURE(BYTE EntityTypeIndex, BYTE BaseTypeIndex, STRING NameOfSymbol),DERIVED
+StartProc   PROCEDURE,DERIVED
+EndProc     PROCEDURE,DERIVED
           END
   CODE
   SYSTEM{7A58h}=1  !PROP:PropVScroll in C11
@@ -738,7 +745,8 @@ eINTERFACE      equate('INTERFACE')
                    EquQ:LabelType  = UPPER(CwLabel)
                    EquQ:ClaType    = UPPER(ClarionType) 
                    EquQ:MangleType = EquQ:ClaType
-                   EquQ:Comments   = EqTypeComment 
+                   EquQ:Comments   = EqTypeComment
+                   EquQ:Mangling   = EncodeClarion.SymbolToMangle4Q(EquQ:ClaType)
                    ADD(EquateTypeQ,EquQ:LabelType)
                    IF DbIt THEN DB('   Equate ADD: ' & clip(EquQ:LabelType) & ' Equate(' & EquQ:ClaType ) .
                    return '  ;; Equate ' & Clip(CwLabel) & ' as ' & CLIP(ClarionType)
@@ -856,7 +864,50 @@ sz   CSTRING(SIZE(Prfx)+SIZE(xMessage)+3),AUTO
   sz  = Prfx & CLIP(xMessage) & '<13,10>'
   OutputDebugString( sz )
   return
-!-------------------------------
+
+!=======================================================================================  
+EncodeClarion.SymbolToMangle4Q    PROCEDURE(STRING Symbol)
+SymVal   BYTE
+TVal     BYTE
+    CODE
+    SELF.Symbol_To_SymValTVal(Symbol, SymVal, TVal)       !Calc SymVal, TVal
+    RETURN SELF.Encode_SymVal_TVal(Symbol, SymVal, TVal, 0)  !Lookup SymVal, TVal to find Mangle
+    
+EncodeClarion.Symbol_To_SymValTVal  PROCEDURE(STRING Symbol, *BYTE SymVal, *BYTE TVal)
+    CODE
+    Symbol=UPPER(Symbol)
+                          ! 1 Bf      2 Bb      3 Bk  4 Bq    5 Br     6 Bw      7 Bi   8 Ba
+    SymVal = INLIST(Symbol,'FILE',   'BLOB',   'KEY','QUEUE','REPORT','WINDOW', 'VIEW','APPLICATION') 
+    CASE Symbol
+    OF 'INDEX' ; SymVal = 3 !INDEX same as KEY
+    END    
+    TVal = INLIST(Symbol, 'BYTE',    'SHORT',  'LONG',   'USHORT','ULONG', 'SREAL',  'REAL',   'DATE', 'TIME',   'DECIMAL',|
+                          'PDECIMAL','BFLOAT4','BFLOAT8','?',     'STRING','PSTRING','CSTRING','GROUP','BSTRING','ASTRING',|
+                          'USTRING' )    !Note DATETIME is DECIMAL
+    CASE Symbol
+    OF 'ANY' ; TVal = 14    !ANY same as ?
+    END
+    RETURN 
+
+EncodeClarion.Encode_SymVal_TVal    PROCEDURE(STRING Symbol, Byte EVal,Byte TVal, BYTE IsRaw) !,STRING
+Mangling1 PSTRING(8)
+    CODE
+    IF EVal THEN             !  1    2    3    4    5    6    7    8
+      Mangling1 = CHOOSE(EVal,'Bf','Bb','Bk','Bq','Br','Bw','Bi','Ba')     !E.g. Bf->FILE  Bw->WINDOW
+
+    ELSIF TVal THEN          ! 1    2    3    4    5    6    7   8    9    10           
+      Mangling1 = CHOOSE(TVal,'Uc','s' ,'l' ,'Us','Ul','f' ,'d','bd','bt','e' ,|  !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL DATE TIME DECIMAL
+                              'p' ,'b4','b8','u' ,'sb','sp','' , '' ,'sw','sa',|  !     PDECIMAL BFLOAT4 BFLOAT8 ANY STRING PString BString AString
+                              'sz')   !USTRING is "zu/su" assume sz
+      CASE UPPER(Symbol)
+     ! OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Hope this will change to "sz" for both
+      OF 'CSTRING' ; Mangling1 = Mangling1 & CHOOSE(IsRaw,'c','sc')
+      OF 'GROUP'   ; Mangling1 = Mangling1 & CHOOSE(IsRaw,'v','g')
+      END
+    END     
+    RETURN Mangling1
+!=======================================================================================
+
 Converter.StoreName   PROCEDURE(string s,byte PreserveCase)
   CODE
     Self.Hold = Clip(choose(~PreserveCase,UPPER(s),s))         !Carl my cwHH prototypes were UPLOW
@@ -922,20 +973,6 @@ sName    string(255),auto
                                     IF DbIt THEN DB(' {9}Did GetSymbol Gn='& Gn &'     Symbol="'& Symbol &'"   SymbolP=' & SymbolP & |
                                                     '   '& CHOOSE(~Self.IsOmitable,'','<> ') & CHOOSE(~Self.IsAddress,'','* ') & CHOOSE(~Self.ADims,'','[]') ) .
         IF ~Symbol THEN BREAK .
-!        IF INLIST( UPPER(Symbol),'SIGNED','UNSIGNED','BOOL')            !Some Clarion equated Longs
-!             Symbol='LONG'
-!
-!        ELSIF INLIST( UPPER(Symbol),'HANDLE','HRESULT','DWORD','COLORREF','LPVOID','LPCVOID','PLONG', |
-!                                    'HWND','HINSTANCE','HMODULE','HMENU','HDC','HICON','HCURSOR','HBRUSH','HBITMAP','HGDIOBJ','HFONT','HRGN','HGLOBAL','HPEN','HRESULT')
-!             Symbol='LONG'                      !Some Common Windows LONGs, I hope these aren't a problem (could add a switch)
-!
-!        ELSIF INLIST( UPPER(Symbol),'DWORD','DWORD')
-!             Symbol='ULONG'                     !this one could be equated more then one way?
-!
-!        ELSIF INLIST( UPPER(Symbol),'WORD','WORD')
-!             Symbol='USHORT'                 !change some equated data types used in ABC classes
-!
-!        END
 
         !Trablate Equated type to Clarion
         EquQ:LabelType = UPPER(Symbol)
@@ -1261,6 +1298,7 @@ ChNdx    long
          EquQ:LabelType = upper(EquQ:LabelType)
          EquQ:ClaType   = upper(EquQ:ClaType)
          EquQ:MangleType = CHOOSE(EquQ:LabelType=EquQ:ClaType,'',EquQ:ClaType)
+         EquQ:Mangling   = EncodeClarion.SymbolToMangle4Q(EquQ:ClaType)
          PUT(EquateTypeQ)
          ! IF DbIt THEN DB(EquQ:LabelType[1:32] & EquQ:ClaType).
     end
