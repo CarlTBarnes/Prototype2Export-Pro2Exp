@@ -6,10 +6,6 @@
 !September 15, 2026
 !    Clarion 12 Beta with USTRING and DATETIME. 
 !       As of 12.0.14313 UString choice if zu/su I'm hoping SV will change
-!    Add Types Tab to show EquateTypeQ Queue of Type Translation
-!    Improve EquateTypeQ with Comments to make easier to understand 
-!    Move "BOOL SIGNED UNSIGNED" to list of Clarion Types
-!    Show error message if "NewType Equate(ClaType)" does not find ClaType in Equates Q
 !
 !August 8, 2024
 !   Add a "CLR" button to Clear all my Examples. Shift+Paste button does NOT DO Mangle.
@@ -108,12 +104,6 @@
 
 DbIt    SHORT(1)       !Cut off all the Debug     IF DbIt THEN db(
 
-!_WndPrvInclude_     EQUATE(1)                   !Uncomment these 2 lines to add Wnd Preview Class
-!    Include('CbWndPreview.inc'),ONCE            ! https://github.com/CarlTBarnes/WindowPreview
-!    COMPILE('!* WndPrvCls *',_WndPrvInclude_) 
-!WndPrvCls   CBWndPreviewClass,THREAD            
-!             !* WndPrvCls *
-             
   MAP
     Clw2Exp(*CSTRING InOutProtoLine),string
     FlattenProtoTypes(*CSTRING InOutPrototypes)
@@ -162,8 +152,6 @@ pInterfaceSelf  pstring(255),static     !name of Interface to add to the prototy
 
 EquateTypeQ     QUEUE,PRE(EquQ)         !07/15/2007  Allow equates for other types to be in the pasted code
 LabelType          string(64)           !The type that the developer called it
-MangleType         string(64)           !Blank if the Same as ClaType
-Comments           string(128)          !Info on what its about
 ClaType            string(64)           !aka Clarion type, the longest is probably APPLICATION
                 END
 NamedSymbolList  STRING(1000)           !a list of non-Clarion types found 
@@ -254,14 +242,6 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
             TAB(' &7.1+ EXPORT '),USE(?Tab71Export)
                 TEXT,AT(8,22),FULL,USE(Cw71Txt),VSCROLL,FONT('Consolas',11,COLOR:Black),COLOR(0E1FFFFH),READONLY
             END
-            TAB(' Types '),USE(?TabEquates) 
-                STRING('Prototype Parameter Types are converted to Clarion Types. In Prototype ' & |
-                        'entry you can specify "TYPE EQUATE(BaseType)" to add to this list'),AT(8,20), |
-                        USE(?TypesListFTY),TRN
-                LIST,AT(8,33),FULL,USE(?LIST:EquateTypeQ),VSCROLL,FONT('Consolas',11),VCR, |
-                        FROM(EquateTypeQ),FORMAT('72L(2)|M?~Parameter Type~L(2)@s64@62L(2)|M~Mangle ' & |
-                        'Type~L(2)@s64@100L(2)~Comments~L(2)@s128@')           
-            END
             TAB('  About  '),USE(?TabAbout)
                 TEXT,AT(8,22),FULL,USE(AboutTxt),VSCROLL,FONT('Calibri',11,COLOR:Black),COLOR(0E1FFFFH),READONLY
             END
@@ -296,15 +276,11 @@ StartProc   PROCEDURE,VIRTUAL
 EndProc     PROCEDURE,VIRTUAL
           END
   CODE
-  SYSTEM{7A58h}=1  !PROP:PropVScroll in C11
   DO GetIniRtn 
   Load_EquateTypeQ()  
   LoadWindowTxt(CWProto, RulesTxt, AboutTxt, Cw71Txt)  !Move big strings to bottom
      
   OPEN(W)
-    COMPILE('!* WndPrvCls *',_WndPrvInclude_)   
-        WndPrvCls.Init(2)               !Design Window at Runtime using CBWndPreviewClass with invisible button at top   
-    !* WndPrvCls * COMPILE  
   0{PROP:MinWidth} =0{PROP:Width}  * .75
   0{PROP:MinHeight}=0{PROP:Height} * .75
   ?SheetMain{PROP:TabSheetStyle}=1
@@ -524,7 +500,6 @@ XX              long,auto
 CloseParen      long,auto
 CwLabel         string(255)         !10/23/17 renamed CW+Label
 ClarionType     string(16),auto
-EqTypeComment   pstring(129),auto
 Keyword         string(20)    !for keyword after label like PROCEDURE or CLASS or FUNCTION
 KeyWordPos      long
 KeyWordEnd      long
@@ -708,8 +683,7 @@ eINTERFACE      equate('INTERFACE')
                    ClarionType=upper(CwLine[KeyWordEnd+2 : size(CwLine)])   !get xxxxx)
                    XX=instring(')',ClarionType,1)
                    IF XX then ClarionType=UPPER(LEFT(sub(ClarionType,1,XX-1))).  !Should be the original Clarion type
-!                   !First is this Equate replacing an existing one? 
-                    EqTypeComment='Equate in Source: ' & clip(CwLabel) & ' EQUATE(' & clip(ClarionType) & ')'
+!                   !First is this Equate replacing an existing one?
                     IF DbIt THEN DB('Equate in Source: ' & clip(CwLabel) & ' EQUATE(' & clip(ClarionType) & ')' ).
 !                IF DbIt THEN DB('   CwLine=' & CwLine ).
 
@@ -722,26 +696,16 @@ eINTERFACE      equate('INTERFACE')
                    LOOP 50 times                    !translate equate into Clarion type, can do HWND=>HANDLE=>SIGNED=>LONG
                         EquQ:LabelType = ClarionType
                         GET(EquateTypeQ,EquQ:LabelType)
-   IF DbIt THEN DB('Equate Translate GET: ' & clip(ClarionType) & CHOOSE(~~ErrorCode(),' Error'& ErrorCode(),' Got '& clip(EquQ:ClaType)) ).
-                        IF ERRORCODE() THEN 
-                           Message('Looking up Equated Type did not find Clarion Base type "'& clip(ClarionType) &'".' & |
-                                  '||For a "Type EQUATE(BaseType)" line the BaseType must exist in'& |
-                                  '|the Types list on the Types tab.'& |
-                                  '||'& EqTypeComment,'Equate(Type) Not Found in Types List')
-                           return ''  !BREAK.         !if not EQUATE (a clarion type) then forget it
-                        END 
+                        IF ERRORCODE() THEN return ''.  !BREAK.         !if not EQUATE (a clarion type) then forget it
                         IF EquQ:ClaType = EquQ:LabelType THEN BREAK.    !Eqts queue has Clarion base type (i.e. LONG Equate(LONG))
-                        EqTypeComment=EqTypeComment & ' => ('& CLIP(EquQ:ClaType) &')'
                         IF DbIt THEN DB('   Equate ' & clip(ClarionType) & ' redefined to ' & EquQ:ClaType ) .
                         ClarionType = EquQ:ClaType                    !e.g. have HWND Equate(HANDLE) and just found HANDLE Equate(LONG)
                    END
-                   EquQ:LabelType  = UPPER(CwLabel)
-                   EquQ:ClaType    = UPPER(ClarionType) 
-                   EquQ:MangleType = EquQ:ClaType
-                   EquQ:Comments   = EqTypeComment 
+                   EquQ:LabelType = UPPER(CwLabel)
+                   EquQ:ClaType = UPPER(ClarionType)
                    ADD(EquateTypeQ,EquQ:LabelType)
                    IF DbIt THEN DB('   Equate ADD: ' & clip(EquQ:LabelType) & ' Equate(' & EquQ:ClaType ) .
-                   return '  ;; Equate ' & Clip(CwLabel) & ' as ' & CLIP(ClarionType)
+                   return '  ;; Equate ' & Clip(CwLabel) & ' as ' & ClarionType
                 end
                 return ''
             else
@@ -1029,7 +993,7 @@ Mangling1 PSTRING(128)      !08/09/24 refactor to use Local Var for debug instea
       Mangling1 = Mangling1 & CHOOSE(TVal,'Uc','s','l' ,'Us','Ul','f' ,'d' ,'bd' ,'bt','e',|    !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL
                                           'p','b4','b8','u' ,'sb','sp','',  '',   'sw','sa',|
                                           '')   !USTRING zu/su cannot be done here like EVERY other mangle :(
-      CASE UPPER(Symbol)
+                                          CASE UPPER(Symbol)
       OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Hope this will change to "sz" for both
       OF 'CSTRING' ; Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'c','sc')
       OF 'GROUP'   ; Mangling1 = Mangling1 & CHOOSE(Self.IsRaw,'v','g')
@@ -1213,54 +1177,37 @@ Load_EquateTypeQ    procedure()               !Load EquateTypeQ
 ChNdx    long
     code
     !First load all the Clarion types so I have them in the queue, makes it easy to know when I am done looking up because I found a Clarion type
-    CLEAR(EquateTypeQ)
     loop ChNdx = 1 to 99
          EquQ:LabelType=choose(ChNdx, |
                              'FILE',    'BLOB',   'KEY',    'QUEUE', 'REPORT','WINDOW',  'VIEW','APPLICATION', |
                              'BYTE',    'SHORT',  'LONG',   'USHORT','ULONG', 'SREAL',   'REAL',   'DATE', 'TIME',   'DECIMAL',|
                              'PDECIMAL','BFLOAT4','BFLOAT8','STRING','PSTRING','CSTRING','GROUP','BSTRING','ASTRING', |
-                             'USTRING','DATETIME', |            !09/17/26 New 12 Beta 
-                             's BOOL','l SIGNED','l UNSIGNED','l POINTER_T','l COUNT_T', |     !09/17/26 Equates Move up to Clarion Types as they are in the HELP
-                             '')    !Last Blank ends the loop
+                             '')                                                             !Last Blank ends the loop
          if ~EquQ:LabelType then break.
          EquQ:ClaType = EquQ:LabelType                 !Label=Cla
-         EquQ:Comments='Clarion Base Type'
-         CASE EquQ:LabelType
-         OF 'USTRING'  ;                          EquQ:Comments='Clarion Base Type for Unicode Wide String - 12.0.14200'
-         OF 'DATETIME' ; EquQ:ClaType='DECIMAL' ; EquQ:Comments='SQL DateTime is Decimal(19,7) = Seconds since 12/28/1800 - 12.0.14313'
-         OF 'KEY' ; add(EquateTypeQ) ; EquQ:LabelType='INDEX' ; EquQ:Comments=CLIP(EquQ:Comments) &' - INDEX same as KEY'
-         END
-         IF EquQ:LabelType[1] >= 'l' THEN !09/17/26 Equate LONG like 'l SIGNED'
-            CASE EquQ:LabelType[1]    !09/17/26 Equate LONG like 'l SIGNED'
-            OF 'l' ; EquQ:ClaType = 'LONG'  
-            OF 'u' ; EquQ:ClaType = 'ULONG' !Future 
-            OF 's' ; EquQ:ClaType = 'LONG'
-            END
-            EquQ:LabelType=SUB(EquQ:LabelType,3,99)
-            EquQ:Comments='Clarion Type in EQUATES.CLW as EQUATE('& CLIP(EquQ:ClaType) & ')'
-         END
          add(EquateTypeQ)
     end
 
     EquQ:ClaType = 'LONG'                           !Add the Windows API long types
     loop ChNdx = 1 to 99
          EquQ:LabelType=choose(ChNdx, |
-                             | !'SIGNED','UNSIGNED','BOOL' , |   !Clarion Equates.clw types 09/17/26 moved up above
+                             'SIGNED','UNSIGNED','BOOL' , |                                        !Clarion types, DO NOT remove these
                              'HANDLE','HRESULT','DWORD','COLORREF','LPVOID','LPCVOID','PLONG',|
                              'HWND','HINSTANCE','HMODULE','HMENU','HDC','HICON','HCURSOR','HBRUSH', |
                              'HBITMAP','HGDIOBJ','HFONT','HRGN','HGLOBAL','HPEN', |
                              '')                                                           !Last Blank ends the loop
          if ~EquQ:LabelType then break.
-         EquQ:Comments='Windows API LONG Types'
          add(EquateTypeQ)
     end
-    EquQ:LabelType='WORD' ;  EquQ:ClaType='USHORT' ; EquQ:Comments='Windows API Type' ; add(EquateTypeQ)
 
-    loop ChNdx = 1 to records(EquateTypeQ) !make sure they are all UPPER as it is assumed by other code
+!    EquQ:LabelType='DWORD' ;  EquQ:ClaType='ULONG' ;  add(EquateTypeQ)        !This might not always be so maybe I shouldn't and make user Equate
+    EquQ:LabelType='WORD' ;  EquQ:ClaType='USHORT' ;  add(EquateTypeQ)
+    EquQ:LabelType='DATETIME' ;  EquQ:ClaType='DECIMAL' ; add(EquateTypeQ)     !12.0.14313 DateTime is Decimal(19,7)
+
+    loop ChNdx = 1 to records(EquateTypeQ)                  !make sure they are all UPPER as it is assumed by other code
          GET(EquateTypeQ,ChNdx)
          EquQ:LabelType = upper(EquQ:LabelType)
          EquQ:ClaType   = upper(EquQ:ClaType)
-         EquQ:MangleType = CHOOSE(EquQ:LabelType=EquQ:ClaType,'',EquQ:ClaType)
          PUT(EquateTypeQ)
          ! IF DbIt THEN DB(EquQ:LabelType[1:32] & EquQ:ClaType).
     end
@@ -1278,10 +1225,6 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      'Plus4=1),STRING' &|
      '<13,10>NextTab     PROCEDURE(LONG SheetFEQ, BOOL Wrap=0, <<*LONG TabFEQ>),LONG' &|
      '<13,10>' &|
-     '<13,10>TSTRING EQUATE(USTRING)  !Equated Type' & |
-     '<13,10>AnsiSTRING EQUATE(STRING)  !Equated Type' & |
-     '<13,10>TStringPass  PROCEDURE(TSTRING U1, *TSTRING U2, <<TSTRING U3>, <<*TSTRING U4>, AnsiSTRING AS1)' &|
-     '<13,10>' & |
      '<13,10>MyLong  LONG' &|
      '<13,10>!MyQue   QUEUE,TYPE  !Type not in EXP' &|
      '<13,10>!MyGroup GROUP,TYPE' &|
@@ -1304,7 +1247,7 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>Match              PROCEDURE(CONST *CSTRING),BOOL' &|
      '<13,10>HelpCmd            PROCEDURE(UNSIGNED, <<CONST *CSTRING>, UNSIGNED, LONG=0),BOOL,PROC' &|
      '<13,10>                 END'
-        
+    
     Cw71z = 'You don''t have to use a tool like this to mangle prototypes ' &|
      'and edit an EXP file, but IMO most developers still prefer to have an EXP file to see exports. ' &|
      'Also there is no _flag_ for EXPORT(_flag_) so to have one INC file allow both Export and External requires using Omit/Compile. ' &|
