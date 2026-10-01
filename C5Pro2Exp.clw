@@ -196,14 +196,18 @@ TVal     BYTE
         DO GetSymbol
         IF ~Symbol THEN BREAK . 
         CASE UPPER(Symbol)
-        OF 'ANY'    ; Symbol='?'
-        OF 'SIGNED' OROF 'UNSIGNED' OROF 'BOOL' ; Symbol='LONG'
+        OF 'ANY'        ; Symbol='?'
+        OF   'SIGNED' 
+        OROF 'UNSIGNED' 
+        OROF 'BOOL'     ; Symbol='LONG'
+        OF 'INDEX'      ; Symbol='KEY'
+        OF 'DATETIME'   ; Symbol='DECIMAL'    !09/20/26 C12 Wide
         END
         SymVal = INLIST(UPPER(Symbol),'FILE','BLOB','KEY','QUEUE','REPORT','WINDOW', |
                         'VIEW','APPLICATION')
         TVal = INLIST(UPPER(Symbol),'BYTE','SHORT','LONG','USHORT','ULONG','SREAL',|
                       'REAL','DATE','TIME','DECIMAL','PDECIMAL','BFLOAT4', |
-                      'BFLOAT8','?','STRING','PSTRING','CSTRING','GROUP')
+                      'BFLOAT8','?','STRING','PSTRING','CSTRING','GROUP','USTRING')  !09/20/26 C12 Wide
         Self.StoreSym(SymVal,TVal,Symbol)
       END
     END
@@ -218,6 +222,12 @@ GetSymbol ROUTINE
   LOOP
     Gn += 1
   WHILE Ins[Gn]= ' '
+  IF UPPER(Ins[Gn : Gn+5]) = 'CONST ' THEN   ! CONST is a qualifier, not the type
+    Gn += 5
+    LOOP
+      Gn += 1
+    WHILE Ins[Gn] = ' '
+  END
   IF Ins[Gn]='<<' THEN
     Gn+= 1
     Self.IsOmitable = 1
@@ -262,14 +272,13 @@ ExpConverter.StoreSym    PROCEDURE(Byte EVal,Byte TVal,string symbol)
       
    !INLIST(UPPER(Symbol),'BYTE','SHORT','LONG','USHORT','ULONG','SREAL',|        'Uc','s','l','Us','Ul','f'
    !                   'REAL','DATE','TIME','DECIMAL','PDECIMAL','BFLOAT4', |    'd','bd','bt','e','p','b4'
-   !                   'BFLOAT8','?','STRING','PSTRING','CSTRING','GROUP')       'b8','u','sb','sp','')
+   !                   'BFLOAT8','?','STRING','PSTRING','CSTRING','GROUP','USTRING')       'b8','u','sb','sp','sc','g','sz')
       Self.Hold = Self.Hold & CHOOSE(TVal,'Uc','s','l','Us','Ul','f','d','bd','bt',|
-                              'e','p','b4','b8','u','sb','sp','')
+                              'e','p','b4','b8','u','sb','sp','')   !FYI 'sc','g','sz' are blank here and set below
       CASE UPPER(Symbol)
-      OF 'CSTRING'
-        Self.Hold = Self.Hold & CHOOSE(Self.IsRaw,'c','sc')
-      OF 'GROUP'
-        Self.Hold = Self.Hold & CHOOSE(Self.IsRaw,'v','g')
+      OF 'USTRING' ; Self.Hold = Self.Hold & CHOOSE(Self.IsRaw,'z','sz')    !09/20/26 C12 Wide
+      OF 'CSTRING' ; Self.Hold = Self.Hold & CHOOSE(Self.IsRaw,'c','sc')
+      OF 'GROUP'   ; Self.Hold = Self.Hold & CHOOSE(Self.IsRaw,'v','g')
       END
     ELSE
       Self.Hold = Self.Hold & LEN(Symbol) & UPPER(Symbol)
@@ -312,6 +321,7 @@ I UNSIGNED,AUTO
           CASE UPPER(Symbol)
           OF 'DECIMAL'
           OROF 'PDECIMAL'
+          OROF 'DATETIME'
             Self.Hold[i] = '<0>'
             Self.Hold = Self.Hold & 'unsigned prec,'
             DO LenChar
@@ -329,6 +339,15 @@ I UNSIGNED,AUTO
             IF ~Self.IsRaw THEN
               Self.Hold = Self.Hold & ',void *tpe'
             END
+          OF 'USTRING'
+            Self.Hold[i] = '<0>'
+            IF ~Self.IsRaw THEN
+              Self.Hold = Self.Hold & 'unsigned len,'
+            END
+            Self.Hold = Self.Hold & 'wchar_t *'
+          OF 'ANY'
+            Self.Hold[i] = '<0>'
+            Self.Hold = Self.Hold & 'void *'
           END
         ELSE
           IF Self.IsAddress THEN

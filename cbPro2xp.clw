@@ -3,6 +3,10 @@
 
   PROGRAM
 !Region History Comments
+!October 1, 2026
+!     Clarion 12 Beta 12.0.14373 changes UString to sz and RAW as just "z" (like CString is "c")
+!     If Keyword is not PROCEDURE or FUNCTION then use Match(,,SoundEx) to see if its close and warn
+!
 !September 15, 2026
 !    Clarion 12 Beta with USTRING and DATETIME. 
 !       As of 12.0.14313 UString choice if zu/su I'm hoping SV will change
@@ -111,6 +115,7 @@
 !EndRegion History Comments
 
 DbIt    SHORT(1)       !Cut off all the Debug     IF DbIt THEN db(
+SoundexAlertOFF SHORT  !Don't warn if not Procedure or Function, add as CheckBox on window?
 
 !_WndPrvInclude_     EQUATE(1)                   !Uncomment these 2 lines to add Wnd Preview Class
 !    Include('CbWndPreview.inc'),ONCE            ! https://github.com/CarlTBarnes/WindowPreview
@@ -260,8 +265,8 @@ W   WINDOW('Prototype to EXP Export Mangled Name'),AT(,,490,220),CENTER,GRAY,SYS
                 TEXT,AT(8,22),FULL,USE(Cw71Txt),VSCROLL,FONT('Consolas',11,COLOR:Black),COLOR(0E1FFFFH),READONLY
             END
             TAB(' Types '),USE(?TabEquates) 
-                STRING('Prototype Parameter Types are converted to Clarion Types. In Prototype ' & |
-                        'entry you can specify "TYPE EQUATE(BaseType)" to add to this list'),AT(8,20), |
+                STRING('Parameter Types are converted to Clarion Types. In Prototype ' & |
+                        'entry you can specify "TYPE EQUATE(BaseType)" to add to list. Click Sort Headers.'),AT(8,20), |
                         USE(?TypesListFTY),TRN
                 LIST,AT(8,33),FULL,USE(?LIST:EquateTypeQ),VSCROLL,FONT('Consolas',11),VCR, |
                         FROM(EquateTypeQ),FORMAT('72L(2)|M~Parameter Type~@s64@?62L(2)|M~Mangle Type' & |
@@ -559,6 +564,7 @@ ePROCEDURE      equate('PROCEDURE')
 eFUNCTION       equate('FUNCTION')
 eCLASS          equate('CLASS')
 eINTERFACE      equate('INTERFACE')
+SoundExMatch    PSTRING(12)
 !pFilePRE        PSTRING(20)          !10/23/17 try to do FILE quick-and-fast
 !pFileLabel      PSTRING(64)          !10/23/17 try to do FILE quick-and-fast
   CODE
@@ -677,6 +683,19 @@ eINTERFACE      equate('INTERFACE')
 !                  ERRCODE_@_INODE_@_GRAPHCLASS@F4IGDIOl                   @?  << INODE is Child, IGDI is Parent
 
        else
+            IF SoundexAlertOFF THEN
+            ELSIF Match(ePROCEDURE,Keyword,Match:Soundex) THEN SoundExMatch=ePROCEDURE !I typed Procedcre not PROCEDURE
+            ELSIF Match(eFUNCTION ,Keyword,Match:Soundex) THEN SoundExMatch=eFUNCTION
+            ELSIF Match(eINTERFACE,Keyword,Match:Soundex) THEN SoundExMatch=eINTERFACE
+            ELSIF SUB(Keyword,1,6)='PROCED' THEN SoundExMatch=ePROCEDURE        !If I can get 6 right warn ???
+            END
+            IF SoundExMatch THEN 
+               CASE Message('You typed keyword <9>"'& CLIP(Keyword) &'"|but maybe wanted <9>"'& SoundExMatch &'" ?' & |
+                            '||If so edit your input.||   '& CLIP(CwLine),'Parse Prototype Alert',ICON:Asterisk,'Continue|Stop Alerts')
+               OF 2 ; SoundexAlertOFF=1
+               END
+            END
+
             if InClass = 1 then return('  ;; CLASS Data is NOT exported ==> ' & CwLine).
             CwLabel=clip(choose(~CaseClassName,upper(CwLabel),CwLabel))            !Typically UPPER but follow what ever Class does
             case upper(KeyWord)
@@ -890,7 +909,6 @@ Mangle  STRING(8)
     CODE
     SELF.Symbol_To_SymValTVal(Symbol, SymVal, TVal)       !Calc SymVal, TVal
     Mangle = SELF.Encode_SymVal_TVal(Symbol, SymVal, TVal, 0)  !Lookup SymVal, TVal to find Mangle
-    IF ~Mangle AND Symbol='USTRING' THEN Mangle='zu/su'.    !Just for Queue
     RETURN Mangle
 
 EncodeClarion.Symbol_To_SymValTVal  PROCEDURE(STRING Symbol, *BYTE SymVal, *BYTE TVal)
@@ -915,14 +933,16 @@ Mangling1 PSTRING(8)
     IF EVal THEN             !  1    2    3    4    5    6    7    8
       Mangling1 = CHOOSE(EVal,'Bf','Bb','Bk','Bq','Br','Bw','Bi','Ba')     !E.g. Bf->FILE  Bw->WINDOW
 
-    ELSIF TVal THEN          ! 1    2    3    4    5    6    7   8    9    10
-      Mangling1 = CHOOSE(TVal,'Uc','s' ,'l' ,'Us','Ul','f' ,'d','bd','bt','e' ,|  !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL DATE TIME DECIMAL
-                              'p' ,'b4','b8','u' ,'sb','sp','' , '' ,'sw','sa',|  !     PDECIMAL BFLOAT4 BFLOAT8 ANY STRING PString BString AString
-                              '')   !USTRING is "zu/su" hope for sz
-      CASE UPPER(Symbol)
-    ! OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Done by Caller
-      OF 'CSTRING' ; Mangling1 = Mangling1 & CHOOSE(IsRaw,'c','sc')
-      OF 'GROUP'   ; Mangling1 = Mangling1 & CHOOSE(IsRaw,'v','g')
+    ELSIF TVal THEN          ! 1    2    3    4    5    6    7    8    9    10
+      Mangling1 = CHOOSE(TVal,'Uc','s' ,'l' ,'Us','Ul','f' ,'d' ,'bd','bt','e' ,|  !E.g. BYTE SHORT LONG USHORT ULONG SREAL REAL DATE TIME DECIMAL
+                              'p' ,'b4','b8','u' ,'sb','sp','sc','g' ,'sw','sa',|  !     PDECIMAL BFLOAT4 BFLOAT8 ANY STRING PString CSTRING GROUP BString AString
+                              'sz')   !09/20/26 USTRING as sz or z if Raw
+      IF IsRaw THEN 
+         CASE Mangling1
+         OF 'sz' ; Mangling1 = 'z' !RAW USTRING
+         OF 'sc' ; Mangling1 = 'c' !RAW CSTRING
+         OF 'g'  ; Mangling1 = 'v' !RAW GROUP
+         END
       END
     END
     RETURN Mangling1
@@ -1075,9 +1095,6 @@ EncodeST  PSTRING(128)      !09/18/26 EncodeClarion Class
     ELSIF TVal THEN
       DO Preamble   !Add R=*Address  P=<*Omit Add>  O=<Omit Value>  AAA Array[]
       Mangling1 = Mangling1 & EncodeST  !Was: CHOOSE(TVal,'Uc','s','l' ,'Us','Ul','f' ,'d' ,'bd' ,'bt','e','p','b4','b8','u' ,'sb','sp'...
-      CASE UPPER(Symbol)
-      OF 'USTRING' ; Mangling1 = Mangling1 & CHOOSE(~Self.IsAddress,'zu','su')  !Hope this will change to "sz" for both
-      END
     ELSE
       !This is some Named Symbol encode as  ##NAME where ## is the Length
       Mangling1 = Mangling1 & LEN(Symbol) & choose(~CaseSelfName,UPPER(Symbol),Symbol)      !Carl If Self is preserved then do all the parms
@@ -1128,26 +1145,30 @@ I UNSIGNED,AUTO
           CASE UPPER(Symbol)
           OF 'DECIMAL'
           OROF 'PDECIMAL'
-            Self.Hold[i] = '<0>'
-            Self.Hold = Self.Hold & 'unsigned prec,'
-            DO LenChar
-          OF 'STRING'
-            IF ~Self.IsAddress THEN
-               !Clarion passes STRING with Cla$PushString so no simple C prototype
+          OROF 'DATETIME'
               Self.Hold[i] = '<0>'
-              Self.Hold = Self.Hold & 'n/a' 
-              RETURN
-            END
+              Self.Hold = Self.Hold & 'unsigned prec,'
+              DO LenChar
+          OF 'STRING'
+              IF ~Self.IsAddress THEN
+                 !Clarion passes STRING with Cla$PushString so no simple C prototype
+                Self.Hold[i] = '<0>'
+                Self.Hold = Self.Hold & 'n/a' 
+                RETURN
+              END
           OROF 'PSTRING'
-          OROF 'CSTRING'
-            Self.Hold[i] = '<0>'
-            DO LenChar
+          OROF 'CSTRING' 
+              Self.Hold[i] = '<0>'
+              DO LenChar
+          OF 'USTRING'  
+              Self.Hold[i] = '<0>'
+              DO LenCharWide
           OF 'GROUP'
-            Self.Hold[i] = '<0>'
-            DO LenChar
-            IF ~Self.IsRaw THEN
-              Self.Hold = Self.Hold & ',void *tpe'
-            END
+              Self.Hold[i] = '<0>'
+              DO LenChar
+              IF ~Self.IsRaw THEN
+                Self.Hold = Self.Hold & ',void *tpe'
+              END
           END
         ELSE
           IF Self.IsAddress THEN
@@ -1167,6 +1188,12 @@ LenChar ROUTINE
   END
   Self.Hold = Self.Hold & 'char *'
 
+LenCharWide ROUTINE
+  IF ~Self.IsRaw THEN
+    Self.Hold = Self.Hold & 'unsigned len,'
+  END
+  Self.Hold = Self.Hold & 'wchar_t *'
+  
 CConverter.StartProc     PROCEDURE
   CODE
     Self.Hold = Self.Hold & '('
@@ -1266,9 +1293,11 @@ ChNdx    long
          EquQ:ClaType = EquQ:LabelType                 !Label=Cla
          EquQ:Comments='Clarion Base Type'
          CASE EquQ:LabelType
-         OF 'USTRING'  ;                          EquQ:Comments='Clarion Base Type for Unicode Wide String - 12.0.14200'
+         OF 'USTRING'  ;                          EquQ:Comments='Clarion Base Type - "z" when RAW - Unicode Wide String'
+         OF 'CSTRING'  ;                          EquQ:Comments='Clarion Base Type - "c" when RAW'
          OF 'DATETIME' ; EquQ:ClaType='DECIMAL' ; EquQ:Comments='SQL DateTime is Decimal(19,7) = Seconds since 12/28/1800 - 12.0.14313'
-         OF 'KEY' ; add(EquateTypeQ) ; EquQ:LabelType='INDEX' ; EquQ:Comments=CLIP(EquQ:Comments) &' - INDEX same as KEY'
+         OF 'KEY'      ; ADD(EquateTypeQ)         !Add KEY now and change to INDEX that is the same as KEY
+                         EquQ:LabelType='INDEX' ; EquQ:Comments=CLIP(EquQ:Comments) &' - INDEX same as KEY'
          END
          IF EquQ:LabelType[1] >= 'l' THEN !09/17/26 Equate LONG like 'l SIGNED'
             CASE EquQ:LabelType[1]    !09/17/26 Equate LONG like 'l SIGNED'
@@ -1486,7 +1515,7 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>PSTRING      sp               char *       w/o RAW: unsigned len,char *' &|
      '<13,10>ASTRING      sa' &|
      '<13,10>BSTRING      sw' &|
-     '<13,10>USTRING      zu /su           Clarion 12.0.1429 Beta' &|
+     '<13,10>USTRING      sz       z       Clarion 12.0.14373 Beta' &|
      '<13,10>INT          i                32-bit Integer seen only in C Prototypes' &|
      '<13,10>PROCEDURE    Fmangle_         TYPE procedure => "F" + "prototype mangle" + "_"' &|
      '<13,10>' &|
@@ -1527,10 +1556,10 @@ LoadWindowTxt   procedure(*CSTRING Protoz, *STRING Rulez, *STRING Aboutz, *STRIN
      '<13,10>*ASTRING       Rsa' &|
      '<13,10><<*ASTRING>     Psa' &|
      '<13,10>' &| 
-     '<13,10>USTRING        zu     Clarion 12 Beta Wide String 12.0.14313' &|
-    '<13,10><<USTRING>      Ozu    "zu" inconsistent with "su"' &|
-     '<13,10>*USTRING       Rsu    "su" conflicts with (*SHORT,ANY)' &|
-    '<13,10><<*USTRING>     Psu    Hope SV changes to "sz" for both' &|
+     '<13,10>USTRING        sz         z' &|
+    '<13,10><<USTRING>      Osz       Oz' &|
+     '<13,10>*USTRING       Rsz       Rz' &|
+    '<13,10><<*USTRING>     Psz       Pz' &|
      '<13,10>' &|     
      '<13,10>Miscellaneous -------------------' &|
      '<13,10>CONST has no affect on Clarion Mangle, it does affect C mangling, see below.' &|
