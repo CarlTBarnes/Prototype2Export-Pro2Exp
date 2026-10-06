@@ -3,6 +3,9 @@
 
   PROGRAM
 !Region History Comments
+!October 5, 2026
+!     Refactor SoundEx to allow Cancel Mangle and insert line with exact problem
+!
 !October 1, 2026
 !     Clarion 12 Beta 12.0.14373 changes UString to sz and RAW as just "z" (like CString is "c")
 !     If Keyword is not PROCEDURE or FUNCTION then use Match(,,SoundEx) to see if its close and warn
@@ -124,7 +127,7 @@ SoundexAlertOFF SHORT  !Don't warn if not Procedure or Function, add as CheckBox
 !             !* WndPrvCls *
              
   MAP
-    Clw2Exp(*CSTRING InOutProtoLine),string
+    Clw2Exp(*CSTRING InOutProtoLine, *STRING outAbortMangle),string
     FlattenProtoTypes(*CSTRING InOutPrototypes)
     PipeHideInQuotes(*CSTRING InOutPrototypes, BOOL bHide=True) !03/22/24 CB Hide Pipes inside 'quotes' 
     Tabs2Spaces(*CSTRING pInOutString)
@@ -179,7 +182,7 @@ ClaType            string(64)           !aka Clarion type, the longest is probab
 NamedSymbolList  STRING(1000)           !a list of non-Clarion types found 
 ShowInterfaceMsg BOOL                   !do not show it repeatedly           
 ExpTextEditOk    BYTE
-
+AbortMangle2Exp STRING(255)
 pFilePRE        PSTRING(20)          !10/23/17 try to do FILE quick-and-fast
 pFileLabel      PSTRING(64)          !10/23/17 try to do FILE quick-and-fast
 
@@ -313,6 +316,7 @@ EndProc     PROCEDURE,DERIVED
           END
   CODE
   SYSTEM{7A58h}=1  !PROP:PropVScroll in C11
+  SYSTEM{PROP:FontName}='Segoe UI' ; SYSTEM{PROP:FontSize}=11 ; SYSTEM{PROP:MsgModeDefault}=MSGMODE:CANCOPY
   DO GetIniRtn 
   Load_EquateTypeQ()  
   LoadWindowTxt(CWProto, RulesTxt, AboutTxt, Cw71Txt)  !Move big strings to bottom
@@ -366,8 +370,12 @@ EndProc     PROCEDURE,DERIVED
           If LEFT(CWProtoLine,1)='!' then cycle.            !06/08/22 no !Comments
           !Carl  Do RemoveProcFunc
           !Carl  CWProtoLine = All(' ',IndentLevel) & CWProtoLine
-          CWExpLine = Clip(Clw2Exp(CWProtoLine))
+          CWExpLine = Clip(Clw2Exp(CWProtoLine,AbortMangle2Exp))
           AddCWExpLine(CWExpLine, CWProtoLine)
+          IF AbortMangle2Exp THEN 
+             ExpProto = ExpProto &'<13,10,13,10>'& AbortMangle2Exp
+             BREAK
+          END
 
           If CProto
             CProto = CProto & '<13,10>' & Clip(CConverter.Convert(CWProtoLine))
@@ -545,7 +553,7 @@ SemiPos     ushort
     return
 
 
-Clw2Exp PROCEDURE(*CSTRING InOutLine)
+Clw2Exp PROCEDURE(*CSTRING InOutLine, *STRING outAbortMangle)
 CwLine          string(1000),auto
 TempUpr         string(1000),auto  !don't try to have UPPER CW line, need to keep synching as CWLine changes
 CWLineLen       long,auto
@@ -564,10 +572,10 @@ ePROCEDURE      equate('PROCEDURE')
 eFUNCTION       equate('FUNCTION')
 eCLASS          equate('CLASS')
 eINTERFACE      equate('INTERFACE')
-SoundExMatch    PSTRING(12)
 !pFilePRE        PSTRING(20)          !10/23/17 try to do FILE quick-and-fast
 !pFileLabel      PSTRING(64)          !10/23/17 try to do FILE quick-and-fast
   CODE
+    CLEAR(outAbortMangle)
     IF DbIt THEN DB('----- Clw2Exp Line  In=' & InOutLine).
     If LEFT(InOutLine,1)='!' then return ''.              !06/08/22 no !Comments
     CwLine=CleanCWCode(InOutLine)                         !compresses and removes comments
@@ -682,19 +690,7 @@ SoundExMatch    PSTRING(12)
 !                  CIRCLE_@_INODE_@_GRAPHCLASS@F5INODEddd9GFILLTYPE        @?
 !                  ERRCODE_@_INODE_@_GRAPHCLASS@F4IGDIOl                   @?  << INODE is Child, IGDI is Parent
 
-       else
-            IF SoundexAlertOFF THEN
-            ELSIF Match(ePROCEDURE,Keyword,Match:Soundex) THEN SoundExMatch=ePROCEDURE !I typed Procedcre not PROCEDURE
-            ELSIF Match(eFUNCTION ,Keyword,Match:Soundex) THEN SoundExMatch=eFUNCTION
-            ELSIF Match(eINTERFACE,Keyword,Match:Soundex) THEN SoundExMatch=eINTERFACE
-            ELSIF SUB(Keyword,1,6)='PROCED' THEN SoundExMatch=ePROCEDURE        !If I can get 6 right warn ???
-            END
-            IF SoundExMatch THEN 
-               CASE Message('You typed keyword <9>"'& CLIP(Keyword) &'"|but maybe wanted <9>"'& SoundExMatch &'" ?' & |
-                            '||If so edit your input.||   '& CLIP(CwLine),'Parse Prototype Alert',ICON:Asterisk,'Continue|Stop Alerts')
-               OF 2 ; SoundexAlertOFF=1
-               END
-            END
+       else  !Keyword is NOT Procedure, Function, Class, Interface
 
             if InClass = 1 then return('  ;; CLASS Data is NOT exported ==> ' & CwLine).
             CwLabel=clip(choose(~CaseClassName,upper(CwLabel),CwLabel))            !Typically UPPER but follow what ever Class does
@@ -789,6 +785,12 @@ SoundExMatch    PSTRING(12)
                 end
                 return ''
             else
+                IF ~SoundexAlertOFF THEN 
+                   DO KeywordSoundExCheckRtn
+                   IF outAbortMangle THEN
+                      return('**Cancel** '& CwLine)
+                   END
+                END
                 AddCWExpLine('  $' &     CwLabel)
                 return ''
             end
@@ -843,7 +845,36 @@ OldStyleProcDeclareLabel
     IF DbIt THEN DB('----- Clw2Exp Line Out=' & InOutLine).    
 
     RETURN ExpConverter.Convert(InOutLine)
+!-----------------------------
+KeywordSoundExCheckRtn ROUTINE !If Keyword is not found SoundEx check for common
+   DATA
+CheckX  BYTE
+Matched PSTRING(12)
+Simple4 PSTRING(2)  !* = Not SoundEx a Simple = 4 letters
+    CODE
+    IF SoundexAlertOFF THEN EXIT.
+    LOOP CheckX=1 TO 10
+         Matched=CHOOSE(CheckX, ePROCEDURE,eFUNCTION,eCLASS,eINTERFACE,'')
+    UNTIL ~Matched OR Match(Matched,Keyword,Match:Soundex) 
+    IF ~Matched THEN        !Just a simple first 4 letter check
+       CASE SUB(Keyword,1,4)
+       OF 'PROC' ; Matched=ePROCEDURE 
+       OF 'FUNC' ; Matched=eFUNCTION  
+       OF 'INTE' ; Matched=eINTERFACE
+       END
+       Simple4='*'
+    END 
+    IF ~Matched THEN EXIT.
 
+    CASE Message('You typed keyword: "'& CLIP(Keyword) &'"' & |
+                '|but maybe wanted: "'& Matched &'"'& Simple4 &' ?' & |
+                '||If so edit your input:||'& CLIP(CwLine), |
+                'Parse Prototype Alert',ICON:Asterisk,'Continue|Cancel Mangle|Silence Alerts')
+    OF 2 ; outAbortMangle='Keyword: "'& CLIP(Keyword) &'" should be: '& Matched
+    OF 3 ; SoundexAlertOFF=1
+    END    
+    EXIT
+    
 IsKeyword PROCEDURE(*string CodeLine, string Keyword2Find)!,long !Check if there is keyword followed by delim, return Pos
 Rtn long,auto
     code
